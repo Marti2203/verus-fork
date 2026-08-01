@@ -2363,6 +2363,60 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
+    // https://github.com/verus-lang/verus/issues/885
+    // An impl's item order used to matter: if a method's ensures referred to a spec fn
+    // declared later in the same impl, the spec fn's definition wasn't visible yet when
+    // the method's postcondition was checked. Regression test for the exec-fn-before-spec-fn
+    // ordering (the ordering that used to fail).
+    #[test] issue_885_impl_item_order_exec_before_spec verus_code! {
+        pub trait KeyTrait: Sized {
+            fn zero() -> (z: Self)
+                ensures z == Self::zero_spec();
+
+            spec fn zero_spec() -> Self;
+        }
+
+        pub struct KeyStruct { pub ukey: u64 }
+
+        impl KeyTrait for KeyStruct {
+            fn zero() -> (z: Self) {
+                KeyStruct { ukey: 0 }
+            }
+
+            open spec fn zero_spec() -> Self {
+                KeyStruct { ukey: 0 }
+            }
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    // https://github.com/verus-lang/verus/issues/885
+    // Same as issue_885_impl_item_order_exec_before_spec, but with the two impl items in the
+    // opposite (previously-required) order, to confirm the two orderings are equivalent.
+    #[test] issue_885_impl_item_order_spec_before_exec verus_code! {
+        pub trait KeyTrait: Sized {
+            fn zero() -> (z: Self)
+                ensures z == Self::zero_spec();
+
+            spec fn zero_spec() -> Self;
+        }
+
+        pub struct KeyStruct { pub ukey: u64 }
+
+        impl KeyTrait for KeyStruct {
+            open spec fn zero_spec() -> Self {
+                KeyStruct { ukey: 0 }
+            }
+
+            fn zero() -> (z: Self) {
+                KeyStruct { ukey: 0 }
+            }
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
     #[test] trait_req_ens_poly verus_code! {
         pub trait Key: Sized {
             spec fn lt(self) -> bool;
