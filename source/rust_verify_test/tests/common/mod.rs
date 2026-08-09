@@ -640,6 +640,99 @@ pub const USE_PRELUDE: &str = crate::common::code_str! {
     use verus_builtin_macros::*;
 };
 
+/// A battery of structurally diverse struct/enum shapes (unit struct, tuple
+/// struct, zero-field struct, single- and multi-parameter generics, a
+/// unit-only enum, a mixed-variant enum, an enum with explicit discriminants,
+/// a `Box`-recursive enum, and a struct nesting another struct), all with
+/// `#[derive(Debug)]` attached.
+///
+/// Originally built while pressure-testing verus-lang/verus#767 ("Panic due
+/// to `#[derive(Debug)]`") across more than the issue's single-field repro.
+/// Intended to be reused (or copied and adapted with a different derive/
+/// attribute) by future tests that need to sweep a whole-item macro or
+/// attribute across many struct/enum shapes at once, rather than each test
+/// author re-inventing a shape battery from scratch.
+pub const DIVERSE_DERIVE_DEBUG_STRUCT_ENUM_SHAPES: &str = crate::common::code_str! {
+    #[derive(Debug)]
+    pub struct Unit;
+
+    #[derive(Debug)]
+    pub struct Pair(pub i32, pub u64);
+
+    #[derive(Debug)]
+    pub struct Empty {}
+
+    #[derive(Debug)]
+    pub struct Wrapper<T> {
+        pub val: T,
+    }
+
+    #[derive(Debug)]
+    pub struct Pair2<A, B> {
+        pub first: A,
+        pub second: B,
+    }
+
+    #[derive(Debug)]
+    pub enum Color {
+        Red,
+        Green,
+        Blue,
+    }
+
+    #[derive(Debug)]
+    pub enum Shape {
+        Circle(u32),
+        Rect { w: u32, h: u32 },
+        Point,
+    }
+
+    #[derive(Debug)]
+    pub enum Discr {
+        A = 1,
+        B = 5,
+        C = 10,
+    }
+
+    #[derive(Debug)]
+    pub enum List {
+        Nil,
+        Cons(i32, Box<List>),
+    }
+
+    #[derive(Debug)]
+    pub struct Inner {
+        pub v: i32,
+    }
+
+    #[derive(Debug)]
+    pub struct Outer {
+        pub inner: Inner,
+        pub tag: u64,
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct MultiDerive {
+        pub x: i32,
+        pub y: i32,
+    }
+
+    #[derive(Debug)]
+    pub struct WithArray {
+        pub data: [u8; 4],
+    }
+
+    #[derive(Debug)]
+    pub struct WithString {
+        pub s: String,
+    }
+
+    #[derive(Debug)]
+    pub struct WithVec {
+        pub v: Vec<u32>,
+    }
+};
+
 pub fn verify_one_file(name: &str, code: String, options: &[&str]) -> Result<TestErr, TestErr> {
     let mut options: Vec<_> = options.into_iter().map(|x| *x).collect();
     let mut no_prelude = false;
