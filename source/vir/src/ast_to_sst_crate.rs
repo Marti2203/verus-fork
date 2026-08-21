@@ -1,4 +1,4 @@
-use crate::ast::{Fun, Krate, VirErr};
+use crate::ast::{Fun, Function, Krate, VirErr};
 use crate::ast_to_sst_func::function_to_sst;
 use crate::context::Ctx;
 use crate::sst::{FunctionSst, KrateSst, KrateSstX};
@@ -13,6 +13,7 @@ pub fn ast_to_sst_krate(
     diagnostics: &impl air::messages::Diagnostics,
     bucket_funs: &HashSet<Fun>,
     krate: &Krate,
+    compute_only_functions: &HashMap<Fun, Function>,
 ) -> Result<KrateSst, VirErr> {
     let mut func_workmap: HashMap<Fun, FunctionSst> = HashMap::new();
     for function in krate.functions.iter() {
@@ -50,13 +51,53 @@ pub fn ast_to_sst_krate(
     }
     assert!(func_workmap.len() == 0);
 
-    let sst_map = Arc::new(sst_infos);
+    // Give the interpreter its own, correctly-elaborated view of functions needed
+    // only by a `by (compute)` assertion (see prune.rs's functions_reachable_for_compute).
+    // Elaborated with the same SCC ordering as everything above (so they may reference
+    // the normal functions above, and each other, and get their own nested compute
+    // asserts elaborated correctly) - but deliberately never published into
+    // `functions`/ctx.func_sst_map, so their axioms never reach the shared bucket-wide
+    // AIR context every other, unrelated query in this bucket draws from.
+    let mut compute_workmap: HashMap<Fun, FunctionSst> = HashMap::new();
+    for (name, function) in compute_only_functions.iter() {
+        if !sst_infos.contains_key(name) {
+            let function_sst = function_to_sst(ctx, diagnostics, bucket_funs, function)?;
+            compute_workmap.insert(name.clone(), function_sst);
+        }
+    }
+    let mut compute_sst_infos: HashMap<Fun, FunctionSst> = sst_infos.clone();
+    let mut compute_functions: Vec<FunctionSst> = Vec::new();
+    for scc_rep in ctx.global.func_call_sccs.iter() {
+        let mut scc_functions: Vec<FunctionSst> = Vec::new();
+        for node in ctx.global.func_call_graph.get_scc_nodes(&scc_rep) {
+            if let crate::recursion::Node::Fun(f) = &node {
+                if let Some(mut func_sst) = compute_workmap.remove(f) {
+                    elaborate_function1(ctx, diagnostics, &compute_sst_infos, &mut func_sst)?;
+                    scc_functions.push(func_sst);
+                }
+            }
+        }
+        for func_sst in scc_functions.into_iter() {
+            if func_sst.x.axioms.spec_axioms.is_some() {
+                compute_sst_infos.insert(func_sst.x.name.clone(), func_sst.clone());
+            }
+            compute_functions.push(func_sst);
+        }
+    }
+    assert!(compute_workmap.len() == 0);
+
+    let sst_map = Arc::new(compute_sst_infos);
     for func_sst in &mut functions {
         elaborate_function_rewrite_recursive(ctx, diagnostics, sst_map.clone(), func_sst)?;
         elaborate_function_bv(ctx, sst_map.clone(), func_sst)?;
 
         assert!(!ctx.func_sst_map.contains_key(&func_sst.x.name));
         ctx.func_sst_map.insert(func_sst.x.name.clone(), func_sst.clone());
+    }
+    for func_sst in &mut compute_functions {
+        elaborate_function_rewrite_recursive(ctx, diagnostics, sst_map.clone(), func_sst)?;
+        elaborate_function_bv(ctx, sst_map.clone(), func_sst)?;
+        // Deliberately not inserted into ctx.func_sst_map / krate_sst.functions.
     }
 
     let krate_sst = Arc::new(KrateSstX {

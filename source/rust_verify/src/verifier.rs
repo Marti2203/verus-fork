@@ -1919,6 +1919,7 @@ impl Verifier {
             fndef_types,
             resolved_typs,
             dyn_traits,
+            compute_only_functions,
         } = prune_info;
         let mono_abstract_datatypes = mono_abstract_datatypes.unwrap();
         let module = pruned_krate
@@ -1950,6 +1951,7 @@ impl Verifier {
             reporter,
             &self.get_bucket(bucket_id).funs,
             &pruned_krate,
+            &compute_only_functions,
         )?;
         if self.args.log_all || self.args.log_args.log_vir_sst {
             let mut file =

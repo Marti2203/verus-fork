@@ -922,6 +922,10 @@ pub struct PruneInfo {
     pub fndef_types: Vec<Fun>,
     pub resolved_typs: Option<Vec<ResolvableType>>,
     pub dyn_traits: HashSet<Path>,
+    // Functions with real (unpruned) bodies needed only by a `by (compute)` assertion
+    // in this bucket - kept out of the main pruned krate's functions, so the
+    // interpreter can see them without their axioms leaking into every other query.
+    pub compute_only_functions: HashMap<Fun, Function>,
 }
 
 pub fn prune_krate_for_module_or_krate(
@@ -1031,6 +1035,12 @@ pub fn prune_krate_for_module_or_krate(
     // Collect all functions that our module reveals:
     let mut revealed_functions: HashSet<Fun> = HashSet::new();
     let mut assert_by_compute = false;
+    // Functions needed only by a `by (compute)` assertion (not otherwise revealed) -
+    // kept separate from revealed_functions so they stay opaque in the main pruned
+    // krate (and hence don't get axiomatized for every other query in the bucket);
+    // ast_to_sst_crate.rs gives the interpreter a private, correctly-elaborated view
+    // of their real bodies instead. See PruneInfo::compute_only_functions.
+    let mut compute_only_fun_names: HashSet<Fun> = HashSet::new();
     for f in &krate.functions {
         if is_root_function(f) {
             if let Some(body) = &f.x.body {
@@ -1043,7 +1053,7 @@ pub fn prune_krate_for_module_or_krate(
                             }
                             ExprX::AssertCompute(computed, _) => {
                                 assert_by_compute = true;
-                                revealed_functions.extend(functions_reachable_for_compute(
+                                compute_only_fun_names.extend(functions_reachable_for_compute(
                                     &function_by_name,
                                     computed,
                                 ));
@@ -1066,6 +1076,14 @@ pub fn prune_krate_for_module_or_krate(
         } else {
             reach(&mut state.reached_functions, &mut state.worklist_functions, f);
         }
+    }
+    // Reach (but don't reveal) every function needed only for compute: their opaque
+    // bodies never get walked by the normal reachability traversal below (that's the
+    // whole point - we don't want their axioms leaking out), so a multi-hop call chain
+    // would otherwise never surface anything past the first, directly-named function.
+    // functions_reachable_for_compute already computed the full transitive closure.
+    for f in &compute_only_fun_names {
+        reach(&mut state.reached_functions, &mut state.worklist_functions, f);
     }
     for group in &krate.reveal_groups {
         if let Some(group_crate) = &group.x.broadcast_use_by_default_when_this_crate_is_imported {
@@ -1417,6 +1435,10 @@ pub fn prune_krate_for_module_or_krate(
         uses_pointee_metadata: state.uses_pointee_metadata,
         uses_ieee_float: state.uses_ieee_float,
     };
+    let compute_only_functions: HashMap<Fun, Function> = compute_only_fun_names
+        .iter()
+        .filter_map(|f| function_by_name.get(f).map(|func| (f.clone(), func.clone())))
+        .collect();
     let prune_info = PruneInfo {
         mono_abstract_datatypes,
         spec_fn_types,
@@ -1424,6 +1446,7 @@ pub fn prune_krate_for_module_or_krate(
         fndef_types,
         resolved_typs: res_typs,
         dyn_traits: state.dyn_traits,
+        compute_only_functions,
     };
     (Arc::new(kratex), prune_info)
 }
