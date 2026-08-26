@@ -295,6 +295,70 @@ pub(crate) fn mk_decreases_at_entry_pre(
     Ok(decls)
 }
 
+// A trigger that calls back into the function (or SCC) currently being defined can never
+// be instantiated inside that function's own body: the body uses the fuel-based `rec%f`
+// encoding of recursion, while the trigger uses the un-fueled `f` form, and the two terms
+// never syntactically match (allowing them to match would risk infinite matching loops).
+// So instead of leaving users with a mysteriously-failing assertion, reject it up front.
+// See https://github.com/verus-lang/verus/issues/608.
+fn check_no_recursive_trigger(ctxt: &Ctxt, body: &Exp) -> Result<(), VirErr> {
+    let resolve = |x: &Fun, typs: &Typs, resolved_method: &Option<(Fun, Typs)>| {
+        if let Some((m, ts)) = resolved_method {
+            (m.clone(), ts.clone())
+        } else {
+            (x.clone(), typs.clone())
+        }
+    };
+    let find_recursive_call = |exp: &Exp| -> Result<(), VirErr> {
+        let mut map = crate::sst_visitor::VisitorScopeMap::new();
+        crate::sst_visitor::exp_visitor_check::<VirErr, _>(exp, &mut map, &mut |e, _map| {
+            if let ExpX::Call(CallFun::Fun(x, resolved_method), typs, _args) = &e.x {
+                let (name, _) = resolve(x, typs, resolved_method);
+                if is_recursive_call(ctxt, x, resolved_method)
+                    && ctxt.ctx.func_map[&name].x.body.is_some()
+                {
+                    return Err(error(
+                        &e.span,
+                        format!(
+                            "cannot use `{}` in a trigger here, since it is called recursively \
+                             from inside the body of `{}`: the trigger uses the un-fueled form \
+                             of the call, which never matches the fueled encoding used to unfold \
+                             `{}`'s own definition, so this quantifier will fail to be \
+                             instantiated where you need it",
+                            crate::ast_util::fun_as_friendly_rust_name(&name),
+                            crate::ast_util::fun_as_friendly_rust_name(
+                                &ctxt.recursive_function_name
+                            ),
+                            crate::ast_util::fun_as_friendly_rust_name(
+                                &ctxt.recursive_function_name
+                            ),
+                        ),
+                    )
+                    .help(
+                        "use a separate, non-recursive trigger instead, e.g. a helper \
+                         `spec fn trig<A>(a: A) -> bool { true }` triggered via `#[trigger] \
+                         trig(v)`",
+                    ));
+                }
+            }
+            Ok(())
+        })
+    };
+    let mut map = crate::sst_visitor::VisitorScopeMap::new();
+    crate::sst_visitor::exp_visitor_check::<VirErr, _>(body, &mut map, &mut |exp, _map| {
+        if let ExpX::Bind(bnd, _) = &exp.x {
+            if let BndX::Quant(_, _, trigs, _) = &bnd.x {
+                for trig in trigs.iter() {
+                    for t in trig.iter() {
+                        find_recursive_call(t)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    })
+}
+
 pub(crate) fn rewrite_spec_recursive_fun_with_fueled_rec_call(
     ctx: &Ctx,
     function: &crate::sst::FunctionSst,
@@ -315,6 +379,8 @@ pub(crate) fn rewrite_spec_recursive_fun_with_fueled_rec_call(
         ctx,
         caller_decreases_typs: vec![], // Not used when num_decreases is None
     };
+
+    check_no_recursive_trigger(&ctxt, &body)?;
 
     // New body: substitute rec%f(args, fuel) for f(args)
     let resolve = |x: &Fun, typs: &Typs, resolved_method: &Option<(Fun, Typs)>| {

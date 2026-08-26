@@ -648,3 +648,55 @@ test_verify_one_file! {
         assert!(err.errors[0].message.contains("Could not automatically infer triggers for this quantifier"));
     }
 }
+
+test_verify_one_file! {
+    // https://github.com/verus-lang/verus/issues/608
+    #[test] issue608_trigger_on_own_recursive_call verus_code! {
+        pub enum T {
+            Base(nat),
+            F(spec_fn(nat) -> T),
+        }
+
+        pub open spec fn is_equal(x: T, y: T) -> bool
+            decreases x
+        {
+            match x {
+                T::Base(_) => x == y,
+                T::F(ff) => match y {
+                    T::F(gg) => forall|v: nat| #[trigger] is_equal(ff(v), gg(v)),
+                    _ => false,
+                },
+            }
+        }
+    } => Err(err) => assert_vir_error_msg(err, "in a trigger here, since it is called recursively")
+}
+
+test_verify_one_file! {
+    // Workaround for issue608_trigger_on_own_recursive_call: an artificial,
+    // fuel-independent trigger works fine and doesn't trip the check above.
+    #[test] issue608_trigger_workaround_verifies verus_code! {
+        pub enum T {
+            Base(nat),
+            F(spec_fn(nat) -> T),
+        }
+
+        pub open spec fn trig(v: nat) -> bool { true }
+
+        pub open spec fn is_equal(x: T, y: T) -> bool
+            decreases x
+        {
+            match x {
+                T::Base(_) => x == y,
+                T::F(ff) => match y {
+                    T::F(gg) => forall|v: nat| #[trigger] trig(v) ==> is_equal(ff(v), gg(v)),
+                    _ => false,
+                },
+            }
+        }
+
+        pub proof fn test(ff: spec_fn(nat) -> T, gg: spec_fn(nat) -> T) {
+            assert((forall|v: nat| #[trigger] trig(v) ==> is_equal(ff(v), gg(v))) ==> is_equal(T::F(ff), T::F(gg)));
+            assert(is_equal(T::F(ff), T::F(gg)) ==> (forall|v: nat| #[trigger] trig(v) ==> is_equal(ff(v), gg(v))));
+        }
+    } => Ok(())
+}
