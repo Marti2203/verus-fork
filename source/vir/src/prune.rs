@@ -1256,6 +1256,21 @@ pub fn prune_krate_for_module_or_krate(
     };
     traverse_reachable(&ctxt, &mut state);
 
+    if let Ok(needle) = std::env::var("VERUS_DEBUG_PRUNE") {
+        let fun_str = fun.map(|f| f.path.segments.last().map(|s| s.to_string()).unwrap_or_default());
+        eprintln!(
+            "[prune-debug] root fun={:?} reached_functions.len()={}",
+            fun_str,
+            state.reached_functions.len()
+        );
+        for rf in &state.reached_functions {
+            let name = rf.path.segments.last().map(|s| s.to_string()).unwrap_or_default();
+            if name.contains(&needle) {
+                eprintln!("[prune-debug]   contains needle: {}", name);
+            }
+        }
+    }
+
     for tr in krate.traits.iter() {
         let traitx = tr.x.clone();
         let assoc_typs = traitx
