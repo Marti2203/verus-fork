@@ -5,7 +5,7 @@ use crate::ast::{
 use crate::ast_util::{dt_as_friendly_rust_name, path_as_friendly_rust_name};
 use crate::context::{ChosenTriggers, Ctx, FunctionCtx};
 use crate::messages::{Span, error};
-use crate::sst::{BinaryOp, CallFun, Exp, ExpX, Trig, Trigs, UniqueIdent};
+use crate::sst::{BinaryOp, BndX, CallFun, Exp, ExpX, Trig, Trigs, UniqueIdent};
 use crate::util::vec_map;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -206,6 +206,9 @@ struct Ctxt {
     next_id: u64,
     // gather for all_triggers (include ExtEq)
     gather_for_all_triggers: bool,
+    // vars bound by a quantifier/lambda/choose nested inside the one we're gathering for;
+    // any term mentioning one of these is out of scope for our trigger and must stay impure
+    blocked_vars: HashSet<VarIdent>,
 }
 
 impl Ctxt {
@@ -321,7 +324,7 @@ fn gather_terms(ctxt: &mut Ctxt, ctx: &Ctx, exp: &Exp, depth: u64) -> (bool, Ter
 
     let (is_pure, term) = match &exp.x {
         ExpX::Const(c) => (true, Arc::new(TermX::App(App::Const(c.clone()), Arc::new(vec![])))),
-        ExpX::Var(x) => (true, Arc::new(TermX::Var(x.clone()))),
+        ExpX::Var(x) => (!ctxt.blocked_vars.contains(x), Arc::new(TermX::Var(x.clone()))),
         ExpX::VarLoc(..) | ExpX::Loc(..) => panic!("unexpected Loc/VarLoc in quantifier"),
         ExpX::VarAt(x, _) => {
             (true, Arc::new(TermX::App(App::VarAt(x.clone(), VarAt::Pre), Arc::new(vec![]))))
@@ -519,8 +522,35 @@ fn gather_terms(ctxt: &mut Ctxt, ctx: &Ctx, exp: &Exp, depth: u64) -> (bool, Ter
         ExpX::WithTriggers(..) => {
             panic!("shouldn't be inferring triggers for WithTriggers expression")
         }
-        ExpX::Bind(_, _) => {
-            // REVIEW: we could at least look for matching loops here
+        ExpX::Bind(bnd, e1) => {
+            // A nested quantifier/lambda/choose isn't itself a trigger term, but terms inside
+            // its body can still trigger our (outer) quantifier, as long as they don't mention
+            // the nested binder's own vars (out of scope for us). Descend, blocking those vars
+            // so any term built from them comes back impure and is never chosen as a trigger.
+            // (`let` is left opaque, as before -- REVIEW: could at least look for matching loops)
+            let mut sub_exps: Vec<&Exp> = Vec::new();
+            let mut newly_blocked: Vec<VarIdent> = Vec::new();
+            match &bnd.x {
+                BndX::Quant(_, bs, _, _) | BndX::Lambda(bs, _) => {
+                    newly_blocked.extend(bs.iter().map(|b| b.name.clone()));
+                    sub_exps.push(e1);
+                }
+                BndX::Choose(bs, _, cond) => {
+                    newly_blocked.extend(bs.iter().map(|b| b.name.clone()));
+                    sub_exps.push(cond);
+                    sub_exps.push(e1);
+                }
+                BndX::Let(_) => {}
+            }
+            for x in &newly_blocked {
+                ctxt.blocked_vars.insert(x.clone());
+            }
+            for sub_exp in sub_exps {
+                gather_terms(ctxt, ctx, sub_exp, depth + 1);
+            }
+            for x in &newly_blocked {
+                ctxt.blocked_vars.remove(x);
+            }
             (false, Arc::new(TermX::App(ctxt.other(), Arc::new(vec![]))))
         }
         ExpX::ArrayLiteral(es) => {
@@ -764,6 +794,7 @@ pub(crate) fn build_triggers(
         pure_best_scores: HashMap::new(),
         next_id: 0,
         gather_for_all_triggers: auto_trigger == AutoType::All,
+        blocked_vars: HashSet::new(),
     };
     for x in vars {
         ctxt.pure_terms_by_var.insert(x.clone(), HashMap::new());

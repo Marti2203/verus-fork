@@ -448,6 +448,22 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
+    #[test] test_auto_trigger_descends_into_nested_quantifier_issue717 verus_code! {
+        uninterp spec fn f(x: int) -> bool;
+        uninterp spec fn g(y: int) -> bool;
+
+        proof fn test() {
+            // no #[trigger]: auto-inference has to look inside the nested `exists`
+            // to find f(x) as a trigger for the outer forall
+            assume(forall|x: int| exists|y: int| f(x) && g(y));
+
+            assume(f(3));
+            assert(exists|y: int| f(3) && g(y));
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
     #[test] test_self_in_trigger_in_clone_issue1347 verus_code! {
         use vstd::*;
         use vstd::prelude::*;
