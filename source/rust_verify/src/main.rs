@@ -137,6 +137,21 @@ pub fn main() {
     // TODO: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::set_var("RUSTC_BOOTSTRAP", "1") };
 
+    // rustc_driver spawns its own worker thread (named "rustc") to run the
+    // actual compilation, and its stack size is controlled by RUST_MIN_STACK
+    // (defaulting to a small size if unset). Deeply left-nested expressions
+    // (e.g. long chains of `Seq::empty().push(0).push(1)...`) can overflow
+    // that default via recursive processing in rustc/VIR passes. Raise the
+    // default (without overriding an explicit user setting) well beyond the
+    // 10MB already used when building vstd (see vstd_build and
+    // vstd/build.rs), since these chains can get much deeper than what's
+    // needed there. See https://github.com/verus-lang/verus/issues/209 and
+    // https://github.com/verus-lang/verus/issues/929 (debug builds hit this
+    // sooner than release, since unoptimized frames are much bigger).
+    if std::env::var_os("RUST_MIN_STACK").map_or(true, |s| s.is_empty()) {
+        unsafe { std::env::set_var("RUST_MIN_STACK", (64 * 1024 * 1024).to_string()) };
+    }
+
     let verifier =
         rust_verify::verifier::Verifier::new(our_args, via_cargo, via_cargo_compile, dep_tracker);
 

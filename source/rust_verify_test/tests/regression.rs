@@ -1532,3 +1532,95 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+// A long chain of `.push(..)` calls builds a deeply left-nested expression
+// tree. Recursive processing of that tree (e.g. in rustc's own compiler
+// thread, which is spawned by rustc_driver with a stack size controlled by
+// RUST_MIN_STACK) used to overflow the default thread stack well before
+// this many pushes; see https://github.com/verus-lang/verus/issues/209.
+//
+// `vargo test` sets RUST_MIN_STACK=20MB for the whole test run, which papers
+// over this specific bug (it's a test-environment workaround, not something
+// a real end user invoking `verus` directly gets). So this test uses
+// `run_verus_raw_without_env` to strip RUST_MIN_STACK and observe verus's
+// genuine out-of-the-box behavior.
+//
+// Note: we deliberately don't assert anything about the resulting sequence.
+// Automatically proving facts about a sequence built from this many nested
+// pushes runs into an unrelated, pre-existing quantifier-instantiation
+// limitation; this test only checks that building (and type-checking /
+// compiling) such a deep expression doesn't crash the verifier itself.
+#[test]
+fn long_push_chain_no_stack_overflow_issue209() {
+    let tempdir = tempfile::TempDir::new().expect("temp dir");
+    let entry_file = tempdir.path().join("test.rs");
+    let push_chain: String = (0..500).map(|i| format!(".push({i})")).collect::<Vec<_>>().join("");
+    let code = format!(
+        "{}\n{}\nuse vstd::prelude::*;\nverus! {{\n    proof fn test_long_push_chain() {{\n        let s1: Seq<int> = Seq::empty(){push_chain};\n        let _ = s1;\n    }}\n}}\nfn main() {{}}\n",
+        FEATURE_PRELUDE, USE_PRELUDE
+    );
+    std::fs::write(&entry_file, code).expect("write source file");
+
+    let mut args = vec![
+        "--internal-test-mode".to_string(),
+        "--crate-name".to_string(),
+        "test_crate".to_string(),
+        "--crate-type".to_string(),
+        "lib".to_string(),
+    ];
+    args.extend(vstd_extern_import_args());
+    args.push(entry_file.to_str().unwrap().to_string());
+    let args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+    let output = run_verus_raw_without_env(&args[..], tempdir.path(), &["RUST_MIN_STACK"]);
+    assert!(
+        output.status.success(),
+        "verus failed (possibly crashed) on a long push chain:\nstatus: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// Same underlying RUST_MIN_STACK issue as long_push_chain_no_stack_overflow_issue209,
+// but via a deeply left-nested arithmetic expression instead of a push chain: this
+// shape overflows much sooner in a debug build than in release (unoptimized code has
+// much bigger stack frames per recursive AST node), which is the debug-build-specific
+// angle raised in https://github.com/verus-lang/verus/issues/929. On the machine this
+// was written on, without RUST_MIN_STACK a debug build of verus crashes on this
+// construct past ~18 levels of nesting and a release build past ~95; this test's depth
+// of 200 comfortably exceeds both.
+#[test]
+fn deeply_nested_expr_no_stack_overflow_issue929() {
+    let tempdir = tempfile::TempDir::new().expect("temp dir");
+    let entry_file = tempdir.path().join("test.rs");
+    let mut expr = "1".to_string();
+    for _ in 0..200 {
+        expr = format!("(1 + {expr})");
+    }
+    let code = format!(
+        "{}\n{}\nuse vstd::prelude::*;\nverus! {{\n    spec fn f() -> nat {{\n        {expr}\n    }}\n}}\nfn main() {{}}\n",
+        FEATURE_PRELUDE, USE_PRELUDE
+    );
+    std::fs::write(&entry_file, code).expect("write source file");
+
+    let mut args = vec![
+        "--internal-test-mode".to_string(),
+        "--crate-name".to_string(),
+        "test_crate".to_string(),
+        "--crate-type".to_string(),
+        "lib".to_string(),
+    ];
+    args.extend(vstd_extern_import_args());
+    args.push(entry_file.to_str().unwrap().to_string());
+    let args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+    let output = run_verus_raw_without_env(&args[..], tempdir.path(), &["RUST_MIN_STACK"]);
+    assert!(
+        output.status.success(),
+        "verus failed (possibly crashed) on a deeply nested expression:\nstatus: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

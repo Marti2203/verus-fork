@@ -487,6 +487,111 @@ pub fn run_verus_raw(args: &[&str], dir: &std::path::Path) -> std::process::Outp
         .expect("raw verus wait failed")
 }
 
+// Like `run_verus_raw`, but also strips the given environment variables
+// before spawning verus. `vargo test` sets RUST_MIN_STACK around the whole
+// test run to work around verus's own (too small) default stack size for
+// its rustc-driver thread; that's a test-environment-only workaround, not
+// something a real end user gets. This lets a test observe verus's actual
+// out-of-the-box defaults. See the `long_push_chain_...issue209` regression
+// test in regression.rs.
+pub fn run_verus_raw_without_env(
+    args: &[&str],
+    dir: &std::path::Path,
+    remove_env: &[&str],
+) -> std::process::Output {
+    if std::env::var("VERUS_IN_VARGO").is_err() {
+        panic!("not running in vargo, read the README for instructions");
+    }
+    let exe = if cfg!(target_os = "windows") { ".exe" } else { "" };
+
+    let current_exe = std::env::current_exe().unwrap();
+    let deps_path = current_exe.parent().unwrap();
+    let target_path = deps_path.parent().unwrap();
+    let profile = target_path.file_name().unwrap().to_str().unwrap();
+    let verus_target_path = target_path
+        .ancestors()
+        .nth(2)
+        .expect("expected path to have at least two parents")
+        .join("target-verus")
+        .join(profile);
+    let bin = verus_target_path.join(format!("rust_verify{exe}"));
+
+    let z3 = std::env::var("VERUS_Z3_PATH")
+        .map(|p| {
+            let p = std::path::PathBuf::from(p);
+            if p.is_relative() { std::path::PathBuf::from("..").join(p) } else { p }
+        })
+        .unwrap_or({
+            if cfg!(target_os = "windows") {
+                std::path::PathBuf::from("..\\z3.exe")
+            } else {
+                std::path::PathBuf::from("../z3")
+            }
+        });
+    let z3 = path::absolute(z3).expect("Failed to find absolute path for Z3 executable");
+
+    let mut cmd = std::process::Command::new(bin);
+    cmd.current_dir(dir).env("VERUS_Z3_PATH", z3).args(args);
+    for key in remove_env {
+        cmd.env_remove(key);
+    }
+    cmd.stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("could not execute verus")
+        .wait_with_output()
+        .expect("raw verus wait failed")
+}
+
+// `--extern`/`--import` args needed to use verus_builtin(_macros) and vstd
+// from a test that invokes verus directly (e.g. via `run_verus_raw` /
+// `run_verus_raw_without_env`) rather than through `verify_files`.
+pub fn vstd_extern_import_args() -> Vec<String> {
+    #[cfg(target_os = "macos")]
+    let (pre, dl) = ("lib", "dylib");
+    #[cfg(target_os = "linux")]
+    let (pre, dl) = ("lib", "so");
+    #[cfg(target_os = "windows")]
+    let (pre, dl) = ("", "dll");
+
+    let current_exe = std::env::current_exe().unwrap();
+    let deps_path = current_exe.parent().unwrap();
+    let target_path = deps_path.parent().unwrap();
+    let profile = target_path.file_name().unwrap().to_str().unwrap();
+    let verus_target_path = target_path
+        .ancestors()
+        .nth(2)
+        .expect("expected path to have at least two parents")
+        .join("target-verus")
+        .join(profile);
+    let verus_target_path_str = verus_target_path.to_str().unwrap();
+
+    let lib_builtin_path = verus_target_path.join("libverus_builtin.rlib");
+    let lib_builtin_macros_path =
+        verus_target_path.join(format!("{}verus_builtin_macros.{}", pre, dl));
+    let lib_state_machines_macros_path =
+        verus_target_path.join(format!("{}verus_state_machines_macros.{}", pre, dl));
+    let lib_vstd_vir_path = verus_target_path.join("vstd.vir");
+    let lib_vstd_path = verus_target_path.join("libvstd.rlib");
+
+    vec![
+        "--extern".to_string(),
+        format!("verus_builtin={}", lib_builtin_path.to_str().unwrap()),
+        "--extern".to_string(),
+        format!("verus_builtin_macros={}", lib_builtin_macros_path.to_str().unwrap()),
+        "--extern".to_string(),
+        format!("verus_state_machines_macros={}", lib_state_machines_macros_path.to_str().unwrap()),
+        "-L".to_string(),
+        format!("dependency={verus_target_path_str}"),
+        "--cfg".to_string(),
+        "vstd_todo".to_string(),
+        "--extern".to_string(),
+        format!("vstd={}", lib_vstd_path.to_str().unwrap()),
+        "--import".to_string(),
+        format!("vstd={}", lib_vstd_vir_path.to_str().unwrap()),
+    ]
+}
+
 pub fn run_cargo_verus(args: &[&str], dir: &std::path::Path) -> std::process::Output {
     run_cargo_verus_with_target(args, dir, &dir.join("target"))
 }
