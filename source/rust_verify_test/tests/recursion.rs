@@ -2085,6 +2085,65 @@ test_verify_one_file! {
     } => Err(e) => assert_fails(e, 3)
 }
 
+// https://github.com/verus-lang/verus/issues/1195
+// A recursive call inside a closure must decrease for the closure's whole domain, not just
+// the inputs it's actually applied to, so the unguarded call here can't be proven to terminate.
+test_verify_one_file! {
+    #[test] issue_1195_recursive_call_in_closure_needs_guard verus_code! {
+        use vstd::prelude::*;
+
+        pub enum Foo {
+            Bar(Vec<Foo>),
+        }
+
+        pub enum SpecFoo {
+            Bar(Seq<SpecFoo>),
+        }
+
+        impl Foo {
+            pub open spec fn dview(&self) -> SpecFoo
+                decreases self
+            {
+                match self {
+                    Foo::Bar(v) => {
+                        SpecFoo::Bar(Seq::new(v.len() as nat, |i: int| v[i].dview()))
+                    }
+                }
+            }
+        }
+    } => Err(e) => assert_help_error_msg(e, "this call is inside a closure")
+}
+
+// Guarding the recursive call with the same bounds check used by `Seq::new` (and falling back
+// to an arbitrary value out of range) makes the call's decreases obligation provable.
+test_verify_one_file! {
+    #[test] issue_1195_recursive_call_in_closure_with_guard verus_code! {
+        use vstd::prelude::*;
+
+        pub enum Foo {
+            Bar(Vec<Foo>),
+        }
+
+        pub enum SpecFoo {
+            Bar(Seq<SpecFoo>),
+        }
+
+        impl Foo {
+            pub open spec fn dview(&self) -> SpecFoo
+                decreases self
+            {
+                match self {
+                    Foo::Bar(v) => {
+                        SpecFoo::Bar(Seq::new(v.len() as nat, |i: int| {
+                            if 0 <= i < v.len() { v[i].dview() } else { arbitrary() }
+                        }))
+                    }
+                }
+            }
+        }
+    } => Ok(())
+}
+
 test_verify_one_file! {
     #[test] lemma_decreases_poly verus_code! {
         spec fn dec<A>(x: &A, y: &A) -> bool {

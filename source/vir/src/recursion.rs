@@ -355,6 +355,35 @@ pub(crate) fn rewrite_rec_call_with_fuel_const(body: &Exp, fuel: usize) -> Exp {
     })
 }
 
+// A closure is a mathematical function over its whole (unbounded) domain, so a recursive
+// call inside a closure body must decrease for every possible input, not just the inputs
+// the closure is actually applied to. Collect closure body spans so `check_termination` can
+// point this out when a call inside one of them fails its decreases check.
+fn closure_body_spans(function: &Function) -> Vec<Span> {
+    let mut spans = Vec::new();
+    if let Some(body) = &function.x.body {
+        crate::ast_visitor::expr_visitor_walk(body, &mut |expr| {
+            match &expr.x {
+                ExprX::Closure(_, body) | ExprX::NonSpecClosure { body, .. } => {
+                    spans.push(body.span.clone());
+                }
+                _ => {}
+            }
+            crate::visitor::VisitorControlFlow::Recurse
+        });
+    }
+    spans
+}
+
+fn span_contains(outer: &Span, inner: &Span) -> bool {
+    if outer.data.len() < 2 || inner.data.len() < 2 || outer.data[0] != inner.data[0] {
+        return false;
+    }
+    let (o_lo, o_hi) = (outer.data[1] >> 32, outer.data[1] & 0xffff_ffff);
+    let (i_lo, i_hi) = (inner.data[1] >> 32, inner.data[1] & 0xffff_ffff);
+    o_lo <= i_lo && i_hi <= o_hi
+}
+
 fn check_termination<'a>(
     ctx: &'a Ctx,
     diagnostics: &impl Diagnostics,
@@ -388,13 +417,19 @@ fn check_termination<'a>(
         ctx,
         caller_decreases_typs,
     };
+    let closure_spans = closure_body_spans(function);
     let stm = map_stm_visitor(body, &mut |s| match &s.x {
         StmX::Call {
             fun: crate::sst::CallTarget::Fun(fun), resolved_method, args, dest, ..
         } if is_recursive_call(&ctxt, fun, resolved_method) => {
             let check =
                 check_decrease_call(&ctxt, diagnostics, &s.span, fun, resolved_method, args)?;
-            let error = error(&s.span, "could not prove termination");
+            let mut error = error(&s.span, "could not prove termination");
+            if closure_spans.iter().any(|c| span_contains(c, &s.span)) {
+                error = error.help(
+                    "this call is inside a closure; the closure is treated as a function over its entire domain, so the call must decrease for every possible input, not just the ones actually used; consider guarding it with the same condition that limits its intended domain (e.g. an index-bounds check)",
+                );
+            }
             let stm_assert = Spanned::new(s.span.clone(), StmX::Assert(None, Some(error), check));
 
             let mut stms = vec![stm_assert, s.clone()];
