@@ -1309,6 +1309,9 @@ fn simplify_function(
     state: &mut State,
     function: &Function,
 ) -> Result<Function, VirErr> {
+    // EXPERIMENT: swapped in for comparison against the CFG-based version - see
+    // delayed_init_cfg.rs.
+    crate::delayed_init_cfg::check_delayed_init_reassignment_cfg(function)?;
     check_delayed_init_reassignment(function)?;
 
     state.reset_for_function();
