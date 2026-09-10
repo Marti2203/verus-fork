@@ -33,20 +33,19 @@
 //! real needs the compiler's own type information (checking the elaborated SST for
 //! a genuine `ExpX::Call` to the exact target `Fun`), which this tool doesn't have.
 //!
-//! Two further, structural limitations from the same root cause (no real name
-//! resolution against actual declarations, only string matching on names):
-//! - A test file defining its own local type or function that happens to share a
-//!   name with a vstd target (e.g. a test-local `struct Entry { fn key(&self)... }`)
-//!   would be silently credited as coverage for the real vstd target. Confirmed no
-//!   such collision exists in the corpus *today* for the specific names this tool
-//!   currently disambiguates, but that is not something the tool itself checks or
-//!   enforces going forward.
-//! - The type scope is per-function, not per-block: `push_scope`/`pop_scope` only
-//!   run at function boundaries, so a `let x: A = ..` in one nested block followed
-//!   by a shadowing `let x: B = ..` in a sibling block within the same function
-//!   would incorrectly leak into code after the first block ends. Not currently
-//!   known to affect any real evidence in the corpus, but untested in either
-//!   direction.
+//! One further, structural limitation from the same root cause (no real name
+//! resolution against actual declarations, only string matching on names): a test
+//! file defining its own local type or function that happens to share a name with a
+//! vstd target (e.g. a test-local `struct Entry { fn key(&self)... }`) would be
+//! silently credited as coverage for the real vstd target. Confirmed no such
+//! collision exists in the corpus *today* for the specific names this tool
+//! currently disambiguates, but that is not something the tool itself checks or
+//! enforces going forward.
+//!
+//! (The type scope used to be per-function rather than per-block, which could have
+//! let a shadowing `let` in one nested block leak its type into a later sibling
+//! block - fixed by giving every `{ ... }` its own scope via `visit_block`, not
+//! just function bodies.)
 //!
 //! Every GAP this reports still needs the same manual fail-without/pass-with-fix
 //! confirmation used for the char::len_utf8/is_whitespace case (PR #2919) before
@@ -91,7 +90,7 @@ use quote::ToTokens;
 use verus_syn::spanned::Spanned;
 use verus_syn::visit::{self, Visit};
 use verus_syn::{
-    Assert, AssumeSpecification, Expr, ExprCall, ExprMethodCall, File, FnArgKind, FnMode,
+    Assert, AssumeSpecification, Block, Expr, ExprCall, ExprMethodCall, File, FnArgKind, FnMode,
     ImplItemFn, ItemFn, ItemImpl, Lit, Local, Pat, Path, Signature, SignatureSpec, TraitItemFn,
     Type,
 };
@@ -397,6 +396,17 @@ impl<'a, 'ast> Visit<'ast> for CoverageScanner<'a> {
             }
         }
         visit::visit_local(self, i);
+    }
+
+    // Every `{ ... }` block gets its own scope, not just function bodies - a `let`
+    // in one nested block must not leak its type into a later sibling block. The
+    // function-level push in visit_item_fn/visit_impl_item_fn/visit_trait_item_fn
+    // still holds the params; this adds one (harmlessly redundant, for the fn's own
+    // top-level block) or more (for real nesting) layers on top.
+    fn visit_block(&mut self, i: &'ast Block) {
+        self.push_scope();
+        visit::visit_block(self, i);
+        self.pop_scope();
     }
 
     // requires/ensures/recommends/decreases/invariants/returns are always spec-mode
