@@ -2706,6 +2706,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "spec_usage_coverage"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "verus_syn",
+ "walkdir",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
