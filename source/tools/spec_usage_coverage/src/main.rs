@@ -16,17 +16,22 @@
 //!
 //! Still a triage tool, not a certifier. Matching is by bare method/last-path-segment
 //! name; when several targets share one name (e.g. std HashMap's `Entry::key`/
-//! `OccupiedEntry::key`/`VacantEntry::key`), a UFCS call (`Type::method(...)`) or a
-//! method call on a variable with a locally-known declared type (a fn parameter or
-//! an explicitly-typed `let`) disambiguates precisely; a bare method call whose
-//! receiver's type *isn't* locally known is deliberately credited to **none** of the
-//! ambiguous candidates rather than all of them - false positives (crediting the
-//! wrong target) matter more to avoid here than false negatives (missing real
-//! coverage this tool can't see), so an unresolvable ambiguous call counts as no
-//! evidence at all. This is still not full type inference (no return-type tracking,
-//! no generic instantiation) - closing the remaining gap for real needs the
-//! compiler's own type information (checking the elaborated SST for a genuine
-//! `ExpX::Call` to the exact target `Fun`), which this tool doesn't have.
+//! `OccupiedEntry::key`/`VacantEntry::key`), a UFCS call (`Type::method(...)`)
+//! disambiguates by its own explicit qualifier, and a method call disambiguates by
+//! the receiver's locally-known type - a fn parameter or explicitly-typed `let`
+//! annotation, `self` inside an impl block, or a literal's own implied type (`'a'`
+//! is `char`, `5u8` is `u8`). A method call whose receiver's type *isn't*
+//! resolvable this way is credited to **nothing**, even when only one vstd target
+//! shares that name - not just when several do. That single-candidate case looked
+//! safe in theory but wasn't in practice: before this rule, `str::is_empty`'s only
+//! "evidence" in the whole corpus turned out to be calls on a `Set`/mask value and
+//! on an unrelated `&[T]` slice, never an actual `str`. False positives (crediting
+//! the wrong target) matter more to avoid here than false negatives (missing real
+//! coverage this tool can't see), so an unresolvable call counts as no evidence at
+//! all, full stop. This is still not full type inference (no tracking of a method
+//! chain's return type, no generic instantiation) - closing the remaining gap for
+//! real needs the compiler's own type information (checking the elaborated SST for
+//! a genuine `ExpX::Call` to the exact target `Fun`), which this tool doesn't have.
 //!
 //! Every GAP this reports still needs the same manual fail-without/pass-with-fix
 //! confirmation used for the char::len_utf8/is_whitespace case (PR #2919) before
@@ -62,7 +67,8 @@ use verus_syn::spanned::Spanned;
 use verus_syn::visit::{self, Visit};
 use verus_syn::{
     Assert, AssumeSpecification, Expr, ExprCall, ExprMethodCall, File, FnArgKind, FnMode,
-    ImplItemFn, ItemFn, ItemImpl, Local, Pat, Path, Signature, SignatureSpec, TraitItemFn, Type,
+    ImplItemFn, ItemFn, ItemImpl, Lit, Local, Pat, Path, Signature, SignatureSpec, TraitItemFn,
+    Type,
 };
 
 fn line_of<T: Spanned>(node: &T) -> usize {
@@ -70,15 +76,34 @@ fn line_of<T: Spanned>(node: &T) -> usize {
 }
 
 /// The leading type name a value's declared type resolves to, stripping references
-/// and parens - `&u8` and `u8` both give `Some("u8")`. `None` for shapes with no
-/// single leading name (tuples, slices, etc.) - not needed for the cases this tool
-/// disambiguates today.
+/// and parens - `&u8` and `u8` both give `Some("u8")`. `[T]`/`&[T]` (any element)
+/// normalize to the synthetic marker `"[]"`, matching how `<[T]>::len`'s own qself
+/// is resolved below - `<[T]>::len` is generic over the element type, so any slice
+/// receiver is the right kind of match regardless of what it holds. `None` for
+/// shapes with no single leading name (tuples, arrays, etc.) - not needed for the
+/// cases this tool disambiguates today.
 fn type_head(ty: &Type) -> Option<String> {
     match ty {
         Type::Path(p) => p.path.segments.last().map(|s| s.ident.to_string()),
         Type::Reference(r) => type_head(&r.elem),
         Type::Paren(p) => type_head(&p.elem),
         Type::Group(g) => type_head(&g.elem),
+        Type::Slice(_) => Some("[]".to_string()),
+        _ => None,
+    }
+}
+
+/// The type a literal expression's own syntax implies - `'a'` is unambiguously
+/// `char`, `"s"` is `str` (the `&` is implicit at the reference-stripping level
+/// `type_head` already does for declared types), a suffixed number like `5u8`
+/// names its own type. An unsuffixed number's type is inferred from context, which
+/// this tool doesn't track, so it stays unresolved rather than guessed.
+fn literal_type_head(lit: &Lit) -> Option<String> {
+    match lit {
+        Lit::Char(_) => Some("char".to_string()),
+        Lit::Str(_) => Some("str".to_string()),
+        Lit::Int(i) if !i.suffix().is_empty() => Some(i.suffix().to_string()),
+        Lit::Float(f) if !f.suffix().is_empty() => Some(f.suffix().to_string()),
         _ => None,
     }
 }
@@ -212,8 +237,11 @@ struct CoverageScanner<'a> {
     targets: &'a mut Vec<Target>,
     current_line_hint: usize,
     /// Stack of scopes mapping a locally-declared variable to its known type head
-    /// (fn parameters, explicitly-typed `let` bindings). Innermost scope last.
+    /// (fn parameters, explicitly-typed `let` bindings, `self`). Innermost scope last.
     type_scopes: Vec<HashMap<String, String>>,
+    /// The Self type of the impl block currently being visited, if any - used to
+    /// resolve `self.method()` receivers inside its methods.
+    current_impl_self_type: Option<String>,
 }
 
 impl<'a> CoverageScanner<'a> {
@@ -258,9 +286,21 @@ impl<'a> CoverageScanner<'a> {
 
     fn declare_params(&mut self, sig: &Signature) {
         for arg in sig.inputs.iter() {
-            if let FnArgKind::Typed(pat_type) = &arg.kind {
-                if let Pat::Ident(pi) = &*pat_type.pat {
-                    self.declare(pi.ident.to_string(), &pat_type.ty);
+            match &arg.kind {
+                FnArgKind::Typed(pat_type) => {
+                    if let Pat::Ident(pi) = &*pat_type.pat {
+                        self.declare(pi.ident.to_string(), &pat_type.ty);
+                    }
+                }
+                // `self`'s type is the enclosing impl block's Self type, not
+                // syntactically present on the receiver itself.
+                FnArgKind::Receiver(_) => {
+                    if let Some(ty) = self.current_impl_self_type.clone() {
+                        self.type_scopes
+                            .last_mut()
+                            .expect("a scope is always active")
+                            .insert("self".to_string(), ty);
+                    }
                 }
             }
         }
@@ -282,6 +322,13 @@ impl<'a> CoverageScanner<'a> {
 }
 
 impl<'a, 'ast> Visit<'ast> for CoverageScanner<'a> {
+    fn visit_item_impl(&mut self, i: &'ast ItemImpl) {
+        let prev = self.current_impl_self_type.take();
+        self.current_impl_self_type = type_head(&i.self_ty);
+        visit::visit_item_impl(self, i);
+        self.current_impl_self_type = prev;
+    }
+
     fn visit_item_fn(&mut self, i: &'ast ItemFn) {
         let ghost = is_ghost_mode(&i.sig.mode);
         if ghost {
@@ -377,15 +424,18 @@ impl<'a, 'ast> Visit<'ast> for CoverageScanner<'a> {
                 Expr::Path(p) if p.path.segments.len() == 1 => self
                     .lookup_var_type(&p.path.segments[0].ident.to_string())
                     .map(|s| s.to_string()),
+                Expr::Lit(l) => literal_type_head(&l.lit),
                 _ => None,
             };
-            match receiver_type {
-                // Receiver's type is known: credit only the matching target(s).
-                Some(ty) => self.record_hit_for_type(&name, &ty),
-                // Receiver's type is unknown: only credit if there's no ambiguity to
-                // begin with (a single possible target regardless of receiver type).
-                None if self.distinct_owning_types(&name) <= 1 => self.record_hit(&name),
-                None => {}
+            // Unlike UFCS/bare calls, a method call's dispatch genuinely depends on
+            // the receiver's runtime type, which any two vstd types could share a
+            // method name over - so, no exception for "only one vstd candidate"
+            // here: an unresolved receiver credits nothing, full stop. Confirmed
+            // this matters in practice, not just in theory: str::is_empty's only
+            // in-corpus "evidence" before this rule turned out to be a Set/mask
+            // value and an unrelated slice, never an actual str.
+            if let Some(ty) = receiver_type {
+                self.record_hit_for_type(&name, &ty);
             }
         }
         visit::visit_expr_method_call(self, i);
@@ -669,6 +719,7 @@ fn main() {
                 targets: &mut targets,
                 current_line_hint: 0,
                 type_scopes: Vec::new(),
+                current_impl_self_type: None,
             };
             scanner.visit_file(&file);
         }
