@@ -1,0 +1,17 @@
+[package]
+name = "spec_usage_coverage"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+verus_syn = { workspace = true }
+walkdir = { workspace = true }
+
+[[bin]]
+name = "spec_usage_coverage"
+path = "src/main.rs"
+
+[lints]
+workspace = true
