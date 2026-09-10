@@ -14,6 +14,18 @@ tool, not a certifier: every GAP it reports needs the same manual
 fail-without/pass-with-fix confirmation used for the char::len_utf8/
 is_whitespace case (see PR #2919) before treating it as a real bug.
 
+Known, structural limitation (not fixable lexically): matching is by bare
+method name only, with no receiver-type resolution. `Entry::key`,
+`OccupiedEntry::key`, and `VacantEntry::key` (std HashMap's real Entry API)
+are three distinct allow_in_spec targets that all share the name `key` - a
+call like `cloned.key()` inside a `tokenized_state_machine!`-generated test
+gets counted as "covered" evidence for all three, even though `cloned` is
+almost certainly some unrelated generated type with its own `key()`
+accessor, not a real `Entry`/`OccupiedEntry`/`VacantEntry`. Closing this
+gap for real needs the compiler's own type information (i.e. checking the
+elaborated SST for a genuine `ExpX::Call` to the exact target `Fun`), not a
+sharper regex.
+
 Usage:
     python3 spec_usage_coverage.py <verus-source-root>
 """
@@ -23,9 +35,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ALLOW_IN_SPEC_RE = re.compile(r"#\[verifier::allow_in_spec\]")
-ASSUME_SPEC_RE = re.compile(r"assume_specification\s*\[\s*(.+?)\s*\]")
+ASSUME_SPEC_START_RE = re.compile(r"assume_specification\b")
 FN_NAME_RE = re.compile(r"\bfn\s+(\w+)")
 ATTR_LINE_RE = re.compile(r"^\s*#\[")
+# Internal per-type helper modules (e.g. u32_specs, u32_specs_tmp - see num.rs's own
+# "Put in separate module to avoid name collisions" comment): a call qualified by one
+# of these is calling the always-spec-callable helper directly, NOT exercising the
+# allow_in_spec-tagged method's own UFCS path.
+INTERNAL_HELPER_MOD_RE = re.compile(r"_specs(_tmp)?$")
 FN_SIG_START_RE = re.compile(r"\b(proof\s+fn|spec(?:\([\w]+\))?\s+fn|fn)\s+(\w+)")
 CLAUSE_HEADER_RE = re.compile(r"^\s*(requires|ensures|invariant|recommends|decreases|returns)\b")
 
@@ -43,6 +60,36 @@ class Target:
     covered_by: list = field(default_factory=list)
 
 
+def extract_bracket_content(lines, start_i, start_col):
+    """Given the position right after `assume_specification`, find the first `[` and
+    return the text up to its *matching* `]` (tracking nesting, so `<[T]>::len` doesn't
+    end at the inner `]`), scanning across lines if needed."""
+    depth = 0
+    started = False
+    out = []
+    i, col = start_i, start_col
+    while i < len(lines):
+        line = lines[i]
+        while col < len(line):
+            c = line[col]
+            if c == "[":
+                depth += 1
+                started = True
+                if depth > 1:
+                    out.append(c)
+            elif c == "]":
+                depth -= 1
+                if depth == 0:
+                    return "".join(out)
+                out.append(c)
+            elif started:
+                out.append(c)
+            col += 1
+        i += 1
+        col = 0
+    return "".join(out)  # unterminated - best effort
+
+
 def find_targets(vstd_root: Path):
     targets = []
     for path in sorted(vstd_root.rglob("*.rs")):
@@ -55,13 +102,14 @@ def find_targets(vstd_root: Path):
             for j in range(i + 1, min(i + 8, len(lines))):
                 if ATTR_LINE_RE.match(lines[j]):
                     continue
-                m = ASSUME_SPEC_RE.search(lines[j])
+                m = ASSUME_SPEC_START_RE.search(lines[j])
                 if m:
-                    full = m.group(1)
-                    # macro-template paths like <$uN>::wrapping_add - keep the last
-                    # real identifier segment as the method name.
-                    name = re.split(r"::|[<>$]", full)[-1] or re.split(r"::|[<>$]", full)[-2]
-                    targets.append(Target(name, full, str(path), i + 1))
+                    full = extract_bracket_content(lines, j, m.end())
+                    # macro-template paths like <$uN>::wrapping_add, or <[T]>::len -
+                    # keep the last real identifier segment as the method name.
+                    segments = [s for s in re.split(r"::|[<>\[\]$\s]", full) if s]
+                    name = segments[-1] if segments else full
+                    targets.append(Target(name, full.strip(), str(path), i + 1))
                     break
                 m2 = FN_NAME_RE.search(lines[j])
                 if m2:
@@ -101,12 +149,20 @@ def scan_test_file(path: Path, targets_by_name: dict):
         if re.search(r"\bassert(_by|_forall)?\s*[!(]", line):
             in_ghost_here = True
 
-        for name, target_list in targets_by_name.items():
-            # Match both method-call (`x.name(`) and UFCS/associated-fn (`Type::name(`)
-            # forms; require a word boundary so e.g. `name` doesn't match `my_name(`.
-            if re.search(r"(?:\.|::)" + re.escape(name) + r"\(", line) and in_ghost_here:
-                for t in target_list:
-                    t.covered_by.append(f"{path}:{lineno}")
+        if in_ghost_here:
+            for name, target_list in targets_by_name.items():
+                # Method-call form (`x.name(`) always counts - dispatch is on the
+                # receiver's real type, immune to the helper-module false positive below.
+                method_call = re.search(r"\." + re.escape(name) + r"\(", line)
+                # UFCS/associated-fn form (`Qualifier::name(`) only counts if the
+                # qualifier isn't one of the internal `*_specs`/`*_specs_tmp` helper
+                # modules - those are always spec-callable and don't exercise this
+                # method's own allow_in_spec at all (see INTERNAL_HELPER_MOD_RE).
+                ufcs = re.search(r"\b(\w+)::" + re.escape(name) + r"\(", line)
+                ufcs_ok = ufcs and not INTERNAL_HELPER_MOD_RE.search(ufcs.group(1))
+                if method_call or ufcs_ok:
+                    for t in target_list:
+                        t.covered_by.append(f"{path}:{lineno}")
 
         opens = line.count("{")
         closes = line.count("}")
