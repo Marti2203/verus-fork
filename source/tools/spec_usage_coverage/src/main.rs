@@ -33,28 +33,53 @@
 //! real needs the compiler's own type information (checking the elaborated SST for
 //! a genuine `ExpX::Call` to the exact target `Fun`), which this tool doesn't have.
 //!
+//! Two further, structural limitations from the same root cause (no real name
+//! resolution against actual declarations, only string matching on names):
+//! - A test file defining its own local type or function that happens to share a
+//!   name with a vstd target (e.g. a test-local `struct Entry { fn key(&self)... }`)
+//!   would be silently credited as coverage for the real vstd target. Confirmed no
+//!   such collision exists in the corpus *today* for the specific names this tool
+//!   currently disambiguates, but that is not something the tool itself checks or
+//!   enforces going forward.
+//! - The type scope is per-function, not per-block: `push_scope`/`pop_scope` only
+//!   run at function boundaries, so a `let x: A = ..` in one nested block followed
+//!   by a shadowing `let x: B = ..` in a sibling block within the same function
+//!   would incorrectly leak into code after the first block ends. Not currently
+//!   known to affect any real evidence in the corpus, but untested in either
+//!   direction.
+//!
 //! Every GAP this reports still needs the same manual fail-without/pass-with-fix
 //! confirmation used for the char::len_utf8/is_whitespace case (PR #2919) before
 //! being treated as a real bug.
 //!
-//! Real, known blind spot: a `verus!`/`verus_code!` block is parsed *in isolation*
-//! (its raw tokens, re-tokenized and parsed as a standalone item list) - a file whose
+//! Known limitation: a `verus!`/`verus_code!` block is parsed *in isolation* (its
+//! raw tokens, re-tokenized and parsed as a standalone item list) - a file whose
 //! `verus!` body sits inside a `macro_rules!` template using metavariables like `$uN`
-//! (e.g. std_specs/num.rs's `num_specs!` pattern, generating the wrapping/checked/
-//! saturating arithmetic family for every integer type from one template) fails to
-//! parse, since `$uN` isn't valid standalone syntax outside the macro definition
-//! itself. This tool reports such failures on stderr rather than silently dropping
-//! them, but does not attempt to simulate macro_rules! expansion to recover them.
-//! This is a known, *accepted* limitation of parsing a verus! block in isolation in
-//! this codebase's own tooling, not a mistake unique to this tool: `tools/line_count`
-//! hits the identical wall on the same file (`line_count vstd/std_specs/num.rs`
-//! reports 519 of ~528 lines "unaccounted"). A text/regex-based pass (see this tool's
-//! git history for a prior version) doesn't need valid syntax at all, so it happens
-//! not to have this particular blind spot - at the cost of the bracket-nesting and
-//! qualifier-ambiguity bugs a real parser doesn't have. Recovering full precision on
-//! both fronts at once would need a tiny macro_rules! substitution pass (expand each
-//! known invocation like `num_specs!(u8, i8, u8_specs_tmp, ...)` against the
-//! template before parsing) - not attempted here.
+//! is invalid standalone syntax outside the macro definition itself, and fails to
+//! parse on its own. `expand_simple_macros` below recovers exactly one shape of this:
+//! a **single-rule, non-repetition** macro_rules! (no `$(...)* `) - simple positional
+//! substitution of each `$param` with its matching invocation argument. This is
+//! `std_specs/num.rs`'s `num_specs!` pattern exactly (one rule, seven plain
+//! metavariables, six invocations - the wrapping/checked/saturating arithmetic family
+//! for every integer type), and recovers all 192 of its targets.
+//!
+//! It is *not* a general macro_rules! expander: a multi-rule macro (more than one
+//! `=>` arm) or one using repetition is not expanded, and any `allow_in_spec` target
+//! defined inside one would not even appear in the target count - not listed as a
+//! gap, simply invisible. Confirmed today that no *other* vstd file whose verus!
+//! block currently fails to parse this way (bits.rs, atomic_ghost.rs, std_specs/
+//! {ops,cmp,atomic,convert,default,range}.rs, arithmetic/overflow.rs, wrapping.rs -
+//! all multi-rule or repetition-based) actually defines any allow_in_spec target, so
+//! this costs nothing *today*; that is a fact about vstd's current contents, not a
+//! guarantee this tool enforces, and could silently start missing something if one
+//! of those files ever grows an allow_in_spec target of its own. Parse failures are
+//! reported on stderr rather than silently dropped, but only failures the tool
+//! attempts and fails - nothing announces a macro shape it never tried to expand at
+//! all. `tools/line_count` hits the identical isolation-parsing wall on num.rs before
+//! the substitution below runs on it (`line_count vstd/std_specs/num.rs` reports 519
+//! of ~528 lines "unaccounted") - this is an accepted limitation of parsing a verus!
+//! block in isolation in this codebase's own tooling generally, not a mistake unique
+//! to this tool.
 //!
 //! Usage: spec_usage_coverage <verus-source-root>
 
@@ -141,12 +166,6 @@ fn last_two_segments(path: &Path) -> (Option<String>, String) {
         1 => (None, segs[0].clone()),
         n => (Some(segs[n - 2].clone()), segs[n - 1].clone()),
     }
-}
-
-/// Internal per-type helper modules (e.g. u32_specs, u32_specs_tmp) are always
-/// spec-callable and don't exercise the tagged method's own allow_in_spec.
-fn is_internal_helper_mod(qualifier: &str) -> bool {
-    qualifier.ends_with("_specs") || qualifier.ends_with("_specs_tmp")
 }
 
 // ---- Pass 1: collect allow_in_spec targets from vstd ----
@@ -403,11 +422,12 @@ impl<'a, 'ast> Visit<'ast> for CoverageScanner<'a> {
                     // A UFCS call names its type explicitly - credit only that exact
                     // type's target, never every same-named target (e.g.
                     // `i32::checked_div(x, y)` must not also credit i8/i16/.../isize).
-                    // An internal per-type helper module (u32_specs, ...) is always
-                    // spec-callable and doesn't exercise the real method's own
-                    // allow_in_spec at all, so it's excluded rather than matched.
-                    Some(q) if !is_internal_helper_mod(q) => self.record_hit_for_type(&name, q),
-                    Some(_) => {}
+                    // An internal per-type helper module like `u32_specs` (see
+                    // std_specs/num.rs's own "Put in separate module to avoid name
+                    // collisions" comment) needs no special-casing here: no real
+                    // target's owning_type is ever a module name like "u32_specs",
+                    // so record_hit_for_type's exact match already excludes it.
+                    Some(q) => self.record_hit_for_type(&name, q),
                     None if self.distinct_owning_types(&name) <= 1 => self.record_hit(&name),
                     None => {}
                 }
