@@ -14,13 +14,19 @@
 //! internal per-type module - see std_specs/num.rs's own "Put in separate module to
 //! avoid name collisions" comment) by real path segments, not a regex guess.
 //!
-//! Still a triage tool, not a certifier: matching is by bare method/last-path-segment
-//! name with no receiver-type resolution, so two distinct types sharing a method name
-//! (e.g. std HashMap's `Entry::key`/`OccupiedEntry::key`/`VacantEntry::key`) can't be
-//! told apart - a call to an unrelated type's same-named method still counts as
-//! "covered" evidence for all of them. Closing that gap for real needs the compiler's
-//! own type information (checking the elaborated SST for a genuine `ExpX::Call` to
-//! the exact target `Fun`), which this tool doesn't have.
+//! Still a triage tool, not a certifier. Matching is by bare method/last-path-segment
+//! name; when several targets share one name (e.g. std HashMap's `Entry::key`/
+//! `OccupiedEntry::key`/`VacantEntry::key`), a UFCS call (`Type::method(...)`) or a
+//! method call on a variable with a locally-known declared type (a fn parameter or
+//! an explicitly-typed `let`) disambiguates precisely; a bare method call whose
+//! receiver's type *isn't* locally known is deliberately credited to **none** of the
+//! ambiguous candidates rather than all of them - false positives (crediting the
+//! wrong target) matter more to avoid here than false negatives (missing real
+//! coverage this tool can't see), so an unresolvable ambiguous call counts as no
+//! evidence at all. This is still not full type inference (no return-type tracking,
+//! no generic instantiation) - closing the remaining gap for real needs the
+//! compiler's own type information (checking the elaborated SST for a genuine
+//! `ExpX::Call` to the exact target `Fun`), which this tool doesn't have.
 //!
 //! Every GAP this reports still needs the same manual fail-without/pass-with-fix
 //! confirmation used for the char::len_utf8/is_whitespace case (PR #2919) before
@@ -55,18 +61,35 @@ use quote::ToTokens;
 use verus_syn::spanned::Spanned;
 use verus_syn::visit::{self, Visit};
 use verus_syn::{
-    Assert, AssumeSpecification, Expr, ExprCall, ExprMethodCall, File, FnMode, ImplItemFn, ItemFn,
-    Path, SignatureSpec, TraitItemFn,
+    Assert, AssumeSpecification, Expr, ExprCall, ExprMethodCall, File, FnArgKind, FnMode,
+    ImplItemFn, ItemFn, ItemImpl, Local, Pat, Path, Signature, SignatureSpec, TraitItemFn, Type,
 };
 
 fn line_of<T: Spanned>(node: &T) -> usize {
     node.span().start().line
 }
 
+/// The leading type name a value's declared type resolves to, stripping references
+/// and parens - `&u8` and `u8` both give `Some("u8")`. `None` for shapes with no
+/// single leading name (tuples, slices, etc.) - not needed for the cases this tool
+/// disambiguates today.
+fn type_head(ty: &Type) -> Option<String> {
+    match ty {
+        Type::Path(p) => p.path.segments.last().map(|s| s.ident.to_string()),
+        Type::Reference(r) => type_head(&r.elem),
+        Type::Paren(p) => type_head(&p.elem),
+        Type::Group(g) => type_head(&g.elem),
+        _ => None,
+    }
+}
+
 #[derive(Clone)]
 struct Target {
     method_name: String,
     full_path: String,
+    /// The type this method/spec belongs to (e.g. "u8" for `<u8>::wrapping_add`,
+    /// "Entry" for `Entry::key`), when known. `None` for free functions.
+    owning_type: Option<String>,
     file: String,
     line: usize,
     covered_by: Vec<String>,
@@ -106,6 +129,8 @@ fn is_internal_helper_mod(qualifier: &str) -> bool {
 struct TargetCollector {
     file: String,
     targets: Vec<Target>,
+    /// The Self type of the impl block currently being visited, if any.
+    current_impl_self_type: Option<String>,
 }
 
 impl TargetCollector {
@@ -114,12 +139,14 @@ impl TargetCollector {
         attrs: &[verus_syn::Attribute],
         full_path: String,
         method_name: String,
+        owning_type: Option<String>,
         line: usize,
     ) {
         if has_allow_in_spec(attrs) {
             self.targets.push(Target {
                 method_name,
                 full_path,
+                owning_type,
                 file: self.file.clone(),
                 line,
                 covered_by: Vec::new(),
@@ -130,29 +157,48 @@ impl TargetCollector {
 
 impl<'ast> Visit<'ast> for TargetCollector {
     fn visit_item_fn(&mut self, i: &'ast ItemFn) {
-        self.record(&i.attrs, i.sig.ident.to_string(), i.sig.ident.to_string(), line_of(i));
+        // A free function (not inside an impl block) has no owning type.
+        self.record(&i.attrs, i.sig.ident.to_string(), i.sig.ident.to_string(), None, line_of(i));
         visit::visit_item_fn(self, i);
     }
 
+    fn visit_item_impl(&mut self, i: &'ast ItemImpl) {
+        let prev = self.current_impl_self_type.take();
+        self.current_impl_self_type = type_head(&i.self_ty);
+        visit::visit_item_impl(self, i);
+        self.current_impl_self_type = prev;
+    }
+
     fn visit_impl_item_fn(&mut self, i: &'ast ImplItemFn) {
-        self.record(&i.attrs, i.sig.ident.to_string(), i.sig.ident.to_string(), line_of(i));
+        self.record(
+            &i.attrs,
+            i.sig.ident.to_string(),
+            i.sig.ident.to_string(),
+            self.current_impl_self_type.clone(),
+            line_of(i),
+        );
         visit::visit_impl_item_fn(self, i);
     }
 
     fn visit_trait_item_fn(&mut self, i: &'ast TraitItemFn) {
-        self.record(&i.attrs, i.sig.ident.to_string(), i.sig.ident.to_string(), line_of(i));
+        self.record(&i.attrs, i.sig.ident.to_string(), i.sig.ident.to_string(), None, line_of(i));
         visit::visit_trait_item_fn(self, i);
     }
 
     fn visit_assume_specification(&mut self, i: &'ast AssumeSpecification) {
         // `<[T]>::len`-style paths put `[T]` in `qself`, leaving just `::len` in
-        // `path` - render both together so the reported target is readable.
-        let (_, name) = last_two_segments(&i.path);
+        // `path` - render both together so the reported target is readable, and use
+        // qself's type as the owning type when present.
+        let (qualifier, name) = last_two_segments(&i.path);
+        let owning_type = match &i.qself {
+            Some(q) => type_head(&q.ty),
+            None => qualifier,
+        };
         let full = match &i.qself {
             Some(q) => format!("<{}>{}", q.ty.to_token_stream(), i.path.to_token_stream()),
             None => i.path.to_token_stream().to_string(),
         };
-        self.record(&i.attrs, full, name, line_of(i));
+        self.record(&i.attrs, full, name, owning_type, line_of(i));
         visit::visit_assume_specification(self, i);
     }
 }
@@ -165,6 +211,9 @@ struct CoverageScanner<'a> {
     targets_by_name: &'a mut HashMap<String, Vec<usize>>, // name -> indices into `targets`
     targets: &'a mut Vec<Target>,
     current_line_hint: usize,
+    /// Stack of scopes mapping a locally-declared variable to its known type head
+    /// (fn parameters, explicitly-typed `let` bindings). Innermost scope last.
+    type_scopes: Vec<HashMap<String, String>>,
 }
 
 impl<'a> CoverageScanner<'a> {
@@ -176,6 +225,60 @@ impl<'a> CoverageScanner<'a> {
             }
         }
     }
+
+    /// Credits `name` only to targets whose owning type matches `receiver_type`.
+    fn record_hit_for_type(&mut self, name: &str, receiver_type: &str) {
+        if let Some(indices) = self.targets_by_name.get(name) {
+            let evidence = format!("{}:{}", self.file, self.current_line_hint);
+            for &idx in indices {
+                if self.targets[idx].owning_type.as_deref() == Some(receiver_type) {
+                    self.targets[idx].covered_by.push(evidence.clone());
+                }
+            }
+        }
+    }
+
+    fn lookup_var_type(&self, name: &str) -> Option<&str> {
+        self.type_scopes.iter().rev().find_map(|scope| scope.get(name)).map(|s| s.as_str())
+    }
+
+    fn push_scope(&mut self) {
+        self.type_scopes.push(HashMap::new());
+    }
+
+    fn pop_scope(&mut self) {
+        self.type_scopes.pop();
+    }
+
+    fn declare(&mut self, name: String, ty: &Type) {
+        if let Some(head) = type_head(ty) {
+            self.type_scopes.last_mut().expect("a scope is always active").insert(name, head);
+        }
+    }
+
+    fn declare_params(&mut self, sig: &Signature) {
+        for arg in sig.inputs.iter() {
+            if let FnArgKind::Typed(pat_type) = &arg.kind {
+                if let Pat::Ident(pi) = &*pat_type.pat {
+                    self.declare(pi.ident.to_string(), &pat_type.ty);
+                }
+            }
+        }
+    }
+
+    /// How many *distinct* owning types (None counts as one) the candidates for
+    /// `name` span - 1 means unambiguous regardless of receiver type.
+    fn distinct_owning_types(&self, name: &str) -> usize {
+        let Some(indices) = self.targets_by_name.get(name) else { return 0 };
+        let mut seen: Vec<Option<&str>> = Vec::new();
+        for &idx in indices {
+            let ty = self.targets[idx].owning_type.as_deref();
+            if !seen.contains(&ty) {
+                seen.push(ty);
+            }
+        }
+        seen.len()
+    }
 }
 
 impl<'a, 'ast> Visit<'ast> for CoverageScanner<'a> {
@@ -184,7 +287,10 @@ impl<'a, 'ast> Visit<'ast> for CoverageScanner<'a> {
         if ghost {
             self.ghost_depth += 1;
         }
+        self.push_scope();
+        self.declare_params(&i.sig);
         visit::visit_item_fn(self, i);
+        self.pop_scope();
         if ghost {
             self.ghost_depth -= 1;
         }
@@ -195,7 +301,10 @@ impl<'a, 'ast> Visit<'ast> for CoverageScanner<'a> {
         if ghost {
             self.ghost_depth += 1;
         }
+        self.push_scope();
+        self.declare_params(&i.sig);
         visit::visit_impl_item_fn(self, i);
+        self.pop_scope();
         if ghost {
             self.ghost_depth -= 1;
         }
@@ -206,10 +315,22 @@ impl<'a, 'ast> Visit<'ast> for CoverageScanner<'a> {
         if ghost {
             self.ghost_depth += 1;
         }
+        self.push_scope();
+        self.declare_params(&i.sig);
         visit::visit_trait_item_fn(self, i);
+        self.pop_scope();
         if ghost {
             self.ghost_depth -= 1;
         }
+    }
+
+    fn visit_local(&mut self, i: &'ast Local) {
+        if let Pat::Type(pt) = &i.pat {
+            if let Pat::Ident(pi) = &*pt.pat {
+                self.declare(pi.ident.to_string(), &pt.ty);
+            }
+        }
+        visit::visit_local(self, i);
     }
 
     // requires/ensures/recommends/decreases/invariants/returns are always spec-mode
@@ -230,13 +351,18 @@ impl<'a, 'ast> Visit<'ast> for CoverageScanner<'a> {
         if self.ghost_depth > 0 {
             if let Expr::Path(p) = &*i.func {
                 let (qualifier, name) = last_two_segments(&p.path);
-                let ufcs_ok = match &qualifier {
-                    Some(q) => !is_internal_helper_mod(q),
-                    None => true,
-                };
-                if ufcs_ok {
-                    self.current_line_hint = line_of(i);
-                    self.record_hit(&name);
+                self.current_line_hint = line_of(i);
+                match &qualifier {
+                    // A UFCS call names its type explicitly - credit only that exact
+                    // type's target, never every same-named target (e.g.
+                    // `i32::checked_div(x, y)` must not also credit i8/i16/.../isize).
+                    // An internal per-type helper module (u32_specs, ...) is always
+                    // spec-callable and doesn't exercise the real method's own
+                    // allow_in_spec at all, so it's excluded rather than matched.
+                    Some(q) if !is_internal_helper_mod(q) => self.record_hit_for_type(&name, q),
+                    Some(_) => {}
+                    None if self.distinct_owning_types(&name) <= 1 => self.record_hit(&name),
+                    None => {}
                 }
             }
         }
@@ -245,8 +371,22 @@ impl<'a, 'ast> Visit<'ast> for CoverageScanner<'a> {
 
     fn visit_expr_method_call(&mut self, i: &'ast ExprMethodCall) {
         if self.ghost_depth > 0 {
+            let name = i.method.to_string();
             self.current_line_hint = line_of(i);
-            self.record_hit(&i.method.to_string());
+            let receiver_type = match &*i.receiver {
+                Expr::Path(p) if p.path.segments.len() == 1 => self
+                    .lookup_var_type(&p.path.segments[0].ident.to_string())
+                    .map(|s| s.to_string()),
+                _ => None,
+            };
+            match receiver_type {
+                // Receiver's type is known: credit only the matching target(s).
+                Some(ty) => self.record_hit_for_type(&name, &ty),
+                // Receiver's type is unknown: only credit if there's no ambiguity to
+                // begin with (a single possible target regardless of receiver type).
+                None if self.distinct_owning_types(&name) <= 1 => self.record_hit(&name),
+                None => {}
+            }
         }
         visit::visit_expr_method_call(self, i);
     }
@@ -503,7 +643,11 @@ fn main() {
         let Ok(content) = std::fs::read_to_string(&path) else { continue };
         let rel = path.strip_prefix(root).unwrap_or(&path).display().to_string();
         for file in parse_verus_blocks(&rel, &content) {
-            let mut collector = TargetCollector { file: rel.clone(), targets: Vec::new() };
+            let mut collector = TargetCollector {
+                file: rel.clone(),
+                targets: Vec::new(),
+                current_impl_self_type: None,
+            };
             collector.visit_file(&file);
             targets.extend(collector.targets);
         }
@@ -524,6 +668,7 @@ fn main() {
                 targets_by_name: &mut targets_by_name,
                 targets: &mut targets,
                 current_line_hint: 0,
+                type_scopes: Vec::new(),
             };
             scanner.visit_file(&file);
         }
