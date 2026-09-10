@@ -279,6 +279,174 @@ fn find_verus_blocks(tokens: TokenStream, out: &mut Vec<TokenStream>) {
     }
 }
 
+// ---- Minimal macro_rules! substitution, for single-rule, non-repetition macros
+// like std_specs/num.rs's `num_specs!` - just enough to expose the verus! block
+// such macros wrap, not a general macro_rules! expander (no `$(...)* ` support).
+
+struct MacroDef {
+    params: Vec<String>,
+    body: TokenStream,
+}
+
+/// Splits a token sequence on top-level commas (not inside nested groups).
+fn split_on_top_level_commas(tts: &[TokenTree]) -> Vec<Vec<TokenTree>> {
+    let mut parts = Vec::new();
+    let mut current = Vec::new();
+    for tt in tts {
+        match tt {
+            TokenTree::Punct(p) if p.as_char() == ',' => {
+                parts.push(std::mem::take(&mut current));
+            }
+            _ => current.push(tt.clone()),
+        }
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    parts
+}
+
+/// Finds every single-rule `macro_rules! name { (params) => { body }; }` definition
+/// anywhere in `tokens`. Multi-rule macros (more than one `=>` arm) are skipped -
+/// not needed for the one macro (num_specs!) this pass exists for.
+fn find_macro_rules_defs(tokens: &TokenStream, out: &mut HashMap<String, MacroDef>) {
+    let tts: Vec<TokenTree> = tokens.clone().into_iter().collect();
+    let mut i = 0;
+    while i < tts.len() {
+        if let TokenTree::Ident(id) = &tts[i] {
+            if id == "macro_rules" {
+                if let (
+                    Some(TokenTree::Punct(bang)),
+                    Some(TokenTree::Ident(name)),
+                    Some(TokenTree::Group(rules)),
+                ) = (tts.get(i + 1), tts.get(i + 2), tts.get(i + 3))
+                {
+                    if bang.as_char() == '!' {
+                        let rule_tts: Vec<TokenTree> = rules.stream().into_iter().collect();
+                        // Expect exactly: Group(matcher) '=' '>' Group(body) [';']
+                        if let (
+                            Some(TokenTree::Group(matcher)),
+                            Some(TokenTree::Punct(eq)),
+                            Some(TokenTree::Punct(gt)),
+                            Some(TokenTree::Group(body)),
+                        ) = (rule_tts.first(), rule_tts.get(1), rule_tts.get(2), rule_tts.get(3))
+                        {
+                            let is_single_rule = rule_tts.len() <= 5; // + optional trailing ';'
+                            if eq.as_char() == '=' && gt.as_char() == '>' && is_single_rule {
+                                let matcher_tts: Vec<TokenTree> =
+                                    matcher.stream().into_iter().collect();
+                                let mut params = Vec::new();
+                                let mut j = 0;
+                                while j < matcher_tts.len() {
+                                    if let TokenTree::Punct(dollar) = &matcher_tts[j] {
+                                        if dollar.as_char() == '$' {
+                                            if let Some(TokenTree::Ident(p)) =
+                                                matcher_tts.get(j + 1)
+                                            {
+                                                params.push(p.to_string());
+                                            }
+                                        }
+                                    }
+                                    j += 1;
+                                }
+                                out.insert(
+                                    name.to_string(),
+                                    MacroDef { params, body: body.stream() },
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let TokenTree::Group(g) = &tts[i] {
+            find_macro_rules_defs(&g.stream(), out);
+        }
+        i += 1;
+    }
+}
+
+/// Finds every `name!( args )` invocation anywhere in `tokens`, split into
+/// comma-separated argument token sequences.
+fn find_macro_invocations(tokens: &TokenStream, name: &str) -> Vec<Vec<Vec<TokenTree>>> {
+    let mut out = Vec::new();
+    let tts: Vec<TokenTree> = tokens.clone().into_iter().collect();
+    let mut i = 0;
+    while i < tts.len() {
+        if let TokenTree::Ident(id) = &tts[i] {
+            if id == name {
+                if let (Some(TokenTree::Punct(bang)), Some(TokenTree::Group(args))) =
+                    (tts.get(i + 1), tts.get(i + 2))
+                {
+                    if bang.as_char() == '!' {
+                        let arg_tts: Vec<TokenTree> = args.stream().into_iter().collect();
+                        out.push(split_on_top_level_commas(&arg_tts));
+                    }
+                }
+            }
+        }
+        if let TokenTree::Group(g) = &tts[i] {
+            out.extend(find_macro_invocations(&g.stream(), name));
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Substitutes every `$param` in `body` with its matching argument's tokens,
+/// recursing into nested groups (preserving their delimiter).
+fn substitute_macro_body(
+    body: &TokenStream,
+    params: &[String],
+    args: &[Vec<TokenTree>],
+) -> TokenStream {
+    let tts: Vec<TokenTree> = body.clone().into_iter().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < tts.len() {
+        if let TokenTree::Punct(dollar) = &tts[i] {
+            if dollar.as_char() == '$' {
+                if let Some(TokenTree::Ident(name)) = tts.get(i + 1) {
+                    if let Some(pos) = params.iter().position(|p| p == &name.to_string()) {
+                        if let Some(replacement) = args.get(pos) {
+                            out.extend(replacement.iter().cloned());
+                            i += 2;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        match &tts[i] {
+            TokenTree::Group(g) => {
+                let inner = substitute_macro_body(&g.stream(), params, args);
+                let mut new_group = proc_macro2::Group::new(g.delimiter(), inner);
+                new_group.set_span(g.span());
+                out.push(TokenTree::Group(new_group));
+            }
+            other => out.push(other.clone()),
+        }
+        i += 1;
+    }
+    out.into_iter().collect()
+}
+
+/// Expands every invocation of every single-rule macro_rules! definition found in
+/// `tokens`, returning each expansion's substituted token stream.
+fn expand_simple_macros(tokens: &TokenStream) -> Vec<TokenStream> {
+    let mut defs = HashMap::new();
+    find_macro_rules_defs(tokens, &mut defs);
+    let mut expansions = Vec::new();
+    for (name, def) in &defs {
+        for invocation_args in find_macro_invocations(tokens, name) {
+            if invocation_args.len() == def.params.len() {
+                expansions.push(substitute_macro_body(&def.body, &def.params, &invocation_args));
+            }
+        }
+    }
+    expansions
+}
+
 /// Parses every verus!/verus_code! block found in `content`. A block whose tokens
 /// aren't valid standalone Verus syntax - notably a `macro_rules!` template body
 /// containing metavariables like `$uN`, which are only valid inside the macro
@@ -292,7 +460,12 @@ fn parse_verus_blocks(path: &str, content: &str) -> Vec<File> {
         return blocks;
     };
     let mut raw_blocks = Vec::new();
-    find_verus_blocks(tokens, &mut raw_blocks);
+    find_verus_blocks(tokens.clone(), &mut raw_blocks);
+    // Also expand any single-rule macro_rules! (e.g. num_specs!) that wraps its own
+    // verus! block behind metavariables, and search each expansion the same way.
+    for expansion in expand_simple_macros(&tokens) {
+        find_verus_blocks(expansion, &mut raw_blocks);
+    }
     for raw in raw_blocks {
         let rejoined = verus_syn::rejoin_tokens(raw);
         match verus_syn::parse2::<File>(rejoined) {
