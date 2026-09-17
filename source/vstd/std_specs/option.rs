@@ -223,6 +223,19 @@ pub assume_specification<'a, T: Clone>[ Option::<&'a T>::cloned ](opt: Option<&'
         opt.is_some() ==> res.is_some() && cloned::<T>(*opt.unwrap(), res.unwrap()),
 ;
 
+// copied
+//
+// Stronger than `cloned` above: `Copy` makes the result EQUAL to the referent,
+// where `Clone` only relates them through the `cloned` predicate.
+pub assume_specification<'a, T: Copy>[ Option::<&'a T>::copied ](opt: Option<&'a T>) -> (res:
+    Option<T>)
+    ensures
+        res == match opt {
+            Some(x) => Some(*x),
+            None => None::<T>,
+        },
+;
+
 // and_then
 pub assume_specification<T, U, F: FnOnce(T) -> Option<U>>[ Option::<T>::and_then ](
     option: Option<T>,
