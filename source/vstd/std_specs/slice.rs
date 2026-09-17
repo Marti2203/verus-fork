@@ -37,6 +37,14 @@ impl<T> super::super::slice::SliceIndexSpecImpl<[T]> for usize {
 
 pub assume_specification<T>[ <usize as SliceIndex<[T]>>::get ](i: usize, slice: &[T]) -> Option<&T>;
 
+/// `<[T]>::reverse` reverses in place, which is exactly `Seq::reverse` on the
+/// view. Note the slice's LENGTH is unchanged, so no reallocation is involved
+/// and the spec is total.
+pub assume_specification<T>[ <[T]>::reverse ](v: &mut [T])
+    ensures
+        final(v)@ == old(v)@.reverse(),
+;
+
 pub assume_specification<T>[ <usize as SliceIndex<[T]>>::index ](i: usize, slice: &[T]) -> &T
 ;
 
