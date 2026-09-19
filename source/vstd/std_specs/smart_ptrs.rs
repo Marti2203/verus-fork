@@ -38,6 +38,30 @@ pub assume_specification<T: core::default::Default>[ <Rc<
         T::default.ensures((), *res),
 ;
 
+// `Arc` dereferences to its contents. Without this, anything reached through
+// an `Arc` -- `arc_of_slice.iter()`, `arc_of_slice.len()` -- goes through an
+// unspecified `deref` and nothing about the result is known, which breaks the
+// chain at its first step rather than at the method being called.
+//
+// The bounds must match std's `impl<T: ?Sized, A: Allocator> Deref for
+// Arc<T, A>` exactly, so no `View` bound can be added here and the result
+// cannot be described by `@` directly. Stated the way `ManuallyDrop`'s deref
+// is: an uninterpreted contents function, plus a broadcast axiom relating it
+// to the view for the types that have one.
+pub uninterp spec fn arc_contents<T: ?Sized, A: Allocator>(a: &Arc<T, A>) -> &T;
+
+pub assume_specification<T: ?Sized, A: Allocator>[ <Arc<T, A> as core::ops::Deref>::deref ](
+    a: &Arc<T, A>,
+) -> (res: &T)
+    returns
+        arc_contents(a),
+;
+
+pub broadcast axiom fn axiom_arc_contents_view<T: View + ?Sized, A: Allocator>(a: &Arc<T, A>)
+    ensures
+        (#[trigger] arc_contents(a))@ == a@,
+;
+
 pub assume_specification<T>[ Arc::<T>::new ](t: T) -> (v: Arc<T>)
     ensures
         *v == t,

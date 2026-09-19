@@ -77,8 +77,11 @@ impl<A: DeepView> DeepView for alloc::rc::Rc<A> {
     }
 }
 
+// `?Sized` so that `Arc<[T]>` and `Arc<str>` have views, matching `Box<A>`
+// above. Without it these impls cover only sized contents, and an
+// `Arc<[T]>` has no `@` at all.
 #[cfg(feature = "alloc")]
-impl<A: View> View for alloc::sync::Arc<A> {
+impl<A: View + ?Sized> View for alloc::sync::Arc<A> {
     type V = A::V;
 
     #[verifier::inline]
@@ -88,7 +91,7 @@ impl<A: View> View for alloc::sync::Arc<A> {
 }
 
 #[cfg(feature = "alloc")]
-impl<A: DeepView> DeepView for alloc::sync::Arc<A> {
+impl<A: DeepView + ?Sized> DeepView for alloc::sync::Arc<A> {
     type V = A::V;
 
     #[verifier::inline]
