@@ -195,6 +195,29 @@ pub assume_specification [core::panicking::panic_fmt] (s: core::fmt::Arguments<'
         false,
 ;
 
+// `assert_eq!` and `assert_ne!` expand to a call to `core::panicking::assert_failed`,
+// which was unspecified -- so the macros could not be used in `verus!` at all,
+// and the error pointed at `AssertKind` rather than at anything the author
+// wrote. Specified exactly as `panic` above is: reaching it must be proven
+// impossible.
+// TRANSPARENT: `assert_eq!` CONSTRUCTS an `AssertKind::Eq`, which an opaque
+// datatype disallows. The variants are unit-only, so there is nothing to pay.
+#[verifier::external_type_specification]
+pub struct ExAssertKind(core::panicking::AssertKind);
+
+pub assume_specification<T, U>[ core::panicking::assert_failed::<T, U> ](
+    kind: core::panicking::AssertKind,
+    left: &T,
+    right: &U,
+    args: Option<core::fmt::Arguments<'_>>,
+) -> !
+    where
+        T: core::fmt::Debug + ?Sized,
+        U: core::fmt::Debug + ?Sized,
+    requires
+        false,
+;
+
 } // verus!
 
 #[verifier::external_type_specification]
