@@ -1,0 +1,254 @@
+[1;34mvargo info: [0m[34mbuilding rust_verify[0m
+    Updating crates.io index
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling version_check v0.9.5
+   Compiling libc v0.2.189
+   Compiling autocfg v1.5.1
+   Compiling cfg-if v1.0.4
+   Compiling heck v0.5.0
+   Compiling memchr v2.8.3
+   Compiling rustversion v1.0.23
+   Compiling once_cell v1.21.4
+   Compiling pin-project-lite v0.2.17
+   Compiling serde v1.0.229
+   Compiling typenum v1.20.1
+   Compiling utf8parse v0.2.2
+   Compiling num-traits v0.2.19
+   Compiling equivalent v1.0.2
+   Compiling hashbrown v0.17.1
+   Compiling zerocopy v0.8.55
+   Compiling futures-core v0.3.33
+   Compiling futures-sink v0.3.33
+   Compiling anyhow v1.0.104
+   Compiling futures-channel v0.3.33
+   Compiling indexmap v2.14.0
+   Compiling anstyle-parse v1.0.0
+   Compiling proc-macro-error-attr v1.0.4
+   Compiling ahash v0.8.12
+   Compiling futures-task v0.3.33
+   Compiling colorchoice v1.0.5
+   Compiling futures-io v0.3.33
+   Compiling slab v0.4.12
+   Compiling anstyle v1.0.14
+   Compiling anstyle-query v1.1.5
+   Compiling either v1.17.0
+   Compiling parking_lot_core v0.8.6
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling syn v1.0.109
+   Compiling anstream v1.0.0
+   Compiling num-integer v0.1.46
+   Compiling syn v2.0.119
+   Compiling syn v3.0.3
+   Compiling aho-corasick v1.1.4
+   Compiling proc-macro-error v1.0.4
+   Compiling instant v0.1.13
+   Compiling clap_lex v1.1.0
+   Compiling zmij v1.0.23
+   Compiling strsim v0.11.1
+   Compiling rustix v1.1.4
+   Compiling getrandom v0.4.3
+   Compiling winnow v1.0.4
+   Compiling scopeguard v1.2.0
+   Compiling regex-syntax v0.8.11
+   Compiling smallvec v1.15.2
+   Compiling toml_parser v1.1.3+spec-1.1.0
+   Compiling lock_api v0.4.14
+   Compiling clap_builder v4.6.2
+   Compiling serde_derive v1.0.229
+   Compiling clap_derive v4.6.4
+   Compiling serde_spanned v1.1.1
+   Compiling regex-automata v0.4.16
+   Compiling errno v0.3.14
+   Compiling num-bigint v0.4.8
+   Compiling hybrid-array v0.4.14
+   Compiling futures-macro v0.3.33
+   Compiling toml_writer v1.1.2+spec-1.1.0
+   Compiling itoa v1.0.18
+   Compiling allocator-api2 v0.2.21
+   Compiling futures-util v0.3.33
+   Compiling bitflags v2.13.1
+   Compiling serde_json v1.0.151
+   Compiling clap v4.6.4
+   Compiling regex v1.13.1
+   Compiling hashbrown v0.14.5
+   Compiling num-rational v0.4.2
+   Compiling strum_macros v0.26.4
+   Compiling futures-executor v0.3.33
+   Compiling futures v0.3.33
+   Compiling parking_lot v0.11.2
+   Compiling toml_datetime v0.7.5+spec-1.1.0
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling num-iter v0.1.46
+   Compiling num-complex v0.4.6
+   Compiling byteorder v1.5.0
+   Compiling pin-utils v0.1.0
+   Compiling fastrand v2.5.0
+   Compiling fixedbitset v0.4.2
+   Compiling winnow v0.7.15
+   Compiling heck v0.4.1
+   Compiling itertools v0.15.0
+   Compiling duplicate v1.0.0
+   Compiling petgraph v0.6.5
+   Compiling strum v0.26.3
+   Compiling tempfile v3.27.0
+   Compiling num v0.4.3
+   Compiling wasm-timer v0.2.5
+   Compiling fxhash v0.2.1
+   Compiling toml v1.1.4+spec-1.1.0
+   Compiling toml_edit v0.23.10+spec-1.0.0
+   Compiling lasso v0.7.3
+   Compiling block-buffer v0.12.1
+   Compiling crypto-common v0.2.2
+   Compiling bitmask-enum v2.2.5
+   Compiling bitmaps v2.1.0
+   Compiling im v15.1.0
+   Compiling const-oid v0.10.2
+   Compiling bincode-next v3.1.1
+   Compiling semver v1.0.28
+   Compiling rand_core v0.6.4
+   Compiling nonmax v0.5.5
+   Compiling portable-atomic v1.14.0
+   Compiling unicode-width v0.1.14
+   Compiling typed-index-collections v3.5.0
+   Compiling virtue-next v0.1.3
+   Compiling getopts v0.2.21 (https://github.com/utaal/getopts.git?branch=parse-partial#1ba7b831)
+   Compiling sized-chunks v0.6.5
+   Compiling smt-scope v0.1.7
+   Compiling digest v0.11.3
+   Compiling rand_xoshiro v0.6.0
+   Compiling cargo-verus-toolchains v0.1.0 (/Users/martin_2203/verus-fork/source/cargo-verus-toolchains)
+   Compiling bincode_derive-next v3.1.1
+   Compiling tracing-attributes v0.1.31
+   Compiling synstructure v0.13.2
+   Compiling cpufeatures v0.3.0
+   Compiling rapidhash v4.5.1
+   Compiling tracing-core v0.1.36
+   Compiling pastey v0.2.3
+   Compiling sise v0.8.0
+   Compiling yansi v1.0.1
+   Compiling unty-next v0.1.2
+   Compiling unicode-width v0.2.2
+   Compiling console v0.16.4
+   Compiling tracing v0.1.44
+   Compiling sha2 v0.11.0
+   Compiling vir-macros v0.1.0 (/Users/martin_2203/verus-fork/source/vir_macros)
+   Compiling rust_verify v0.1.0 (/Users/martin_2203/verus-fork/source/rust_verify)
+   Compiling num-bigint v0.5.1
+   Compiling itertools v0.12.1
+   Compiling unit-prefix v0.5.2
+   Compiling arrayvec v0.7.8
+   Compiling indicatif v0.18.6
+   Compiling num-format v0.4.4
+   Compiling rustc_mir_build v0.0.0 (/Users/martin_2203/verus-fork/source/rustc_mir_build)
+   Compiling internals_interface v0.1.0 (/Users/martin_2203/verus-fork/source/tools/internals_interface)
+   Compiling air v0.1.0 (/Users/martin_2203/verus-fork/source/air)
+   Compiling hex v0.4.3
+   Compiling vir v0.1.0 (/Users/martin_2203/verus-fork/source/vir)
+    Finished `release` profile [optimized] target(s) in 59.03s
+[1;34mvargo info: [0m[34mbuilding verus_builtin[0m
+   Compiling verus_builtin v0.0.0-2026-08-09-0044 (/Users/martin_2203/verus-fork/source/builtin)
+    Finished `release` profile [optimized] target(s) in 0.26s
+[1;34mvargo info: [0m[34mbuilding verus_builtin_macros[0m
+   Compiling proc-macro2 v1.0.107
+   Compiling verus_syn v0.0.0-2026-08-02-0125 (/Users/martin_2203/verus-fork/dependencies/syn)
+   Compiling verus_prettyplease v0.0.0-2026-08-09-0044 (/Users/martin_2203/verus-fork/dependencies/prettyplease)
+   Compiling convert_case v0.4.0
+   Compiling quote v1.0.47
+   Compiling syn v2.0.119
+   Compiling synstructure v0.13.2
+   Compiling verus_builtin_macros v0.0.0-2026-08-09-0044 (/Users/martin_2203/verus-fork/source/builtin_macros)
+    Finished `release` profile [optimized] target(s) in 14.14s
+[1;34mvargo info: [0m[34mbuilding verus_state_machines_macros[0m
+   Compiling verus_state_machines_macros v0.0.0-2026-08-02-0125 (/Users/martin_2203/verus-fork/source/state_machines_macros)
+    Finished `release` profile [optimized] target(s) in 8.35s
+[1;34mvargo info: [0m[34mbuilding vstd_build[0m
+   Compiling vstd_build v0.1.0 (/Users/martin_2203/verus-fork/source/vstd_build)
+    Finished `release` profile [optimized] target(s) in 0.77s
+[1;34mvargo info: [0m[34mbuilding verus[0m
+   Compiling libc v0.2.189
+   Compiling cmov v0.5.4
+   Compiling find-msvc-tools v0.1.9
+   Compiling shlex v2.0.1
+   Compiling zeroize v1.9.0
+   Compiling pkg-config v0.3.33
+   Compiling crc32fast v1.5.0
+   Compiling zstd-safe v7.2.4
+   Compiling num-traits v0.2.19
+   Compiling block-buffer v0.12.1
+   Compiling inout v0.2.2
+   Compiling ctutils v0.4.2
+   Compiling getrandom v0.4.3
+   Compiling serde v1.0.229
+   Compiling cipher v0.5.2
+   Compiling either v1.17.0
+   Compiling digest v0.11.3
+   Compiling deranged v0.5.8
+   Compiling libbz2-rs-sys v0.2.5
+   Compiling powerfmt v0.2.0
+   Compiling core-foundation-sys v0.8.7
+   Compiling hmac v0.13.0
+   Compiling cpubits v0.1.1
+   Compiling log v0.4.33
+   Compiling simd-adler32 v0.3.10
+   Compiling jobserver v0.1.35
+   Compiling time-core v0.1.9
+   Compiling bumpalo v3.20.3
+   Compiling cc v1.4.0
+   Compiling zlib-rs v0.6.6
+   Compiling num-conv v0.2.2
+   Compiling bzip2 v0.6.1
+   Compiling time v0.3.54
+   Compiling pbkdf2 v0.13.0
+   Compiling iana-time-zone v0.1.65
+   Compiling itertools v0.15.0
+   Compiling zopfli v0.8.3
+   Compiling verus v0.1.0 (/Users/martin_2203/verus-fork/source/verus)
+   Compiling deflate64 v0.1.12
+   Compiling typed-path v0.12.3
+   Compiling zstd-sys v2.0.16+zstd.1.5.7
+   Compiling constant_time_eq v0.4.2
+   Compiling ppmd-rust v1.4.0
+   Compiling cpufeatures v0.3.0
+   Compiling sha2 v0.11.0
+   Compiling aes v0.9.2
+   Compiling sha1 v0.11.0
+   Compiling chrono v0.4.45
+   Compiling cargo-verus-toolchains v0.1.0 (/Users/martin_2203/verus-fork/source/cargo-verus-toolchains)
+   Compiling lzma-rust2 v0.16.5
+   Compiling flate2 v1.1.9
+   Compiling zstd v0.13.3
+   Compiling zip v8.6.0
+    Finished `release` profile [optimized] target(s) in 8.27s
+[1;34mvargo info: [0m[34mbuilding cargo-verus[0m
+   Compiling libc v0.2.189
+   Compiling memchr v2.8.3
+   Compiling thiserror v2.0.19
+   Compiling serde_json v1.0.151
+   Compiling camino v1.2.5
+   Compiling thiserror-impl v2.0.19
+   Compiling cargo-platform v0.3.3
+   Compiling semver v1.0.28
+   Compiling rustc_tools_util v0.4.2
+   Compiling once_cell v1.21.4
+   Compiling cargo-verus v0.1.0 (/Users/martin_2203/verus-fork/source/cargo-verus)
+   Compiling colored v3.1.1
+   Compiling aho-corasick v1.1.4
+   Compiling regex-automata v0.4.16
+   Compiling errno v0.3.14
+   Compiling cpufeatures v0.3.0
+   Compiling getrandom v0.4.3
+   Compiling sha2 v0.11.0
+   Compiling rustix v1.1.4
+   Compiling regex v1.13.1
+   Compiling cargo_metadata v0.23.1
+   Compiling cargo-verus-toolchains v0.1.0 (/Users/martin_2203/verus-fork/source/cargo-verus-toolchains)
+   Compiling tempfile v3.27.0
+   Compiling clap-cargo v0.18.3
+    Finished `release` profile [optimized] target(s) in 6.37s
+[1;34mvargo info: [0m[34mvstd outdated, rebuilding[0m
+    Finished `release` profile [optimized] target(s) in 0.04s
+     Running `target/release/vstd_build /Users/martin_2203/verus-fork/source/target-verus/release --release`
+verification results:: 2043 verified, 0 errors

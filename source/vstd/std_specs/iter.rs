@@ -2,7 +2,7 @@ use super::super::prelude::*;
 use super::super::seq::{
     group_seq_lemmas, lemma_seq_empty, lemma_seq_subrange_index, lemma_seq_subrange_len,
 };
-use core::iter::{Cloned, Copied, Filter, FromIterator, Iterator, Rev, Skip, Take, Zip};
+use core::iter::{Cloned, Copied, Enumerate, Filter, FromIterator, Iterator, Rev, Skip, Take, Zip};
 
 use verus as verus_skip_verusfmt;
 verus_skip_verusfmt! {
@@ -172,6 +172,13 @@ pub trait ExIterator {
             self.obeys_prophetic_iter_laws() ==> cloned_post::<T, Self, Cloned<Self>>(self, r),
     ;
 
+    // `enumerate`: taken from upstream PR #2904 (Ganxiang Yang).
+    fn enumerate(self) -> (r: Enumerate<Self>)
+        where Self: Sized,
+        ensures
+            self.obeys_prophetic_iter_laws() ==> enumerate_post(self, r),
+    ;
+
     fn filter<P>(self, predicate: P) -> (r: core::iter::Filter<Self, P>)
         where
             Self: Sized,
@@ -218,6 +225,65 @@ pub trait ExIterator {
                     &&& old(self).remaining()[idx] == r.unwrap()
                     &&& forall |i| 0 <= i < idx ==>
                         predicate.ensures((#[trigger] &old(self).remaining()[i],), false)
+                }
+            };
+
+    // `position`: taken from upstream PR #2849 (wood-ghost) rather than
+    // written here, so this fork carries the same specification that is under
+    // review upstream.
+    fn position<P>(&mut self, predicate: P) -> (r: Option<usize>)
+        where
+            Self: Sized,
+            P: FnMut(Self::Item) -> bool,
+        ensures
+            // The iterator consistently obeys, completes, and decreases throughout its lifetime
+            final(self).obeys_prophetic_iter_laws() == old(self).obeys_prophetic_iter_laws(),
+            final(self).obeys_prophetic_iter_laws() ==> final(self).will_return_none() == old(self).will_return_none(),
+            final(self).obeys_prophetic_iter_laws() ==> (old(self).decrease() is Some <==> final(self).decrease() is Some),
+            final(self).obeys_prophetic_iter_laws() ==> {
+                final(self).remaining().is_suffix_of(old(self).remaining())
+            },
+            // If position returns None, then the iterator has no remaining
+            // elements, and the predicate was false for all of the original
+            // iterator's elements.
+            final(self).obeys_prophetic_iter_laws() && r.is_none() ==> {
+                &&& final(self).remaining().len() == 0
+                &&& forall |i| 0 <= i < old(self).remaining().len() ==>
+                    predicate.ensures((#[trigger] old(self).remaining()[i],), false)
+            },
+            // If position returns Some, then the returned index whose value satisfies the
+            // predicate, and all previous elements did not satisfy the predicate.
+            final(self).obeys_prophetic_iter_laws() && r.is_some() ==> {
+                let index = r.unwrap();
+                {
+                    &&& index as int == (old(self).remaining().len() - final(self).remaining().len() - 1)
+                    &&& (index as int) < old(self).remaining().len()
+                    &&& 0 <= final(self).remaining().len() < old(self).remaining().len()
+                    &&& predicate.ensures((#[trigger] old(self).remaining()[index as int],), true)
+                    &&& forall |i| 0 <= i < index as int ==>
+                        predicate.ensures((#[trigger] old(self).remaining()[i],), false)
+                }
+            };
+
+    // `nth(n)` consumes `n` elements and returns the next one, so it lands on
+    // index `n` of the original `remaining()` when there are enough elements
+    // and `None` otherwise.
+    fn nth(&mut self, n: usize) -> (r: Option<Self::Item>)
+        where Self: Sized,
+        ensures
+            final(self).obeys_prophetic_iter_laws() == old(self).obeys_prophetic_iter_laws(),
+            final(self).obeys_prophetic_iter_laws() ==> final(self).will_return_none() == old(self).will_return_none(),
+            final(self).obeys_prophetic_iter_laws() ==> (old(self).decrease() is Some <==> final(self).decrease() is Some),
+            final(self).obeys_prophetic_iter_laws() ==> {
+                final(self).remaining().is_suffix_of(old(self).remaining())
+            },
+            final(self).obeys_prophetic_iter_laws() ==> {
+                if n < old(self).remaining().len() {
+                    &&& r == Some(old(self).remaining()[n as int])
+                    &&& final(self).remaining() == old(self).remaining().skip(n + 1)
+                } else {
+                    &&& r is None
+                    &&& final(self).remaining().len() == 0
                 }
             };
 
@@ -587,109 +653,69 @@ pub broadcast axiom fn copied_postcondition<'a, T, I>(i: I, r: Copied<I>)
 ;
 
 /********************************************************************************
- * Defines a convenient wrapper type that bundles state and invariants needed
- * for ergonomic for-loop support.
+ * Definitions for `enumerate()`
  ********************************************************************************/
+#[verifier::external_body]
+#[verifier::external_type_specification]
+#[verifier::reject_recursive_types(I)]
+pub struct ExEnumerate<I>(Enumerate<I>);
 
-pub struct VerusForLoopWrapper<I: Iterator> {
-    pub index: Ghost<int>,
-    pub snapshot: Ghost<I>,
-    pub iter: I,
-    pub history: Ghost<Seq<I::Item>>,
-}
+// Ghost accessor for the inner iterator
+pub uninterp spec fn enumerate_iter<I>(e: Enumerate<I>) -> I;
 
-impl <I: Iterator> VerusForLoopWrapper<I> {
+// Ghost accessor for the number of items the inner iterator has already yielded,
+// i.e. the index `e` will pair with the next item it produces.
+pub uninterp spec fn enumerate_count<I>(e: Enumerate<I>) -> int;
+
+// Ideally, we would write this postcondition directly on the definition of
+// Iterator::enumerate above.  However, to do so, we would need to impose a trait
+// bound of `Self: IteratorSpec`.  However, this introduces a cyclic
+// dependency, since IteratorSpec depends on Iterator.  Hence,
+// we introduce a layer of indirection via this uninterp spec function.
+pub uninterp spec fn enumerate_post<I>(i: I, r: Enumerate<I>) -> bool;
+
+// `enumerate` returns a fresh `Enumerate` over `i` whose counter starts at 0.
+// Everything else about the result (`remaining`, `peek`, `decrease`, ...) follows
+// from the `IteratorSpecImpl` below, which is defined in terms of these two accessors.
+pub broadcast axiom fn enumerate_postcondition<I>(i: I, r: Enumerate<I>)
+    requires
+        #[trigger] enumerate_post(i, r),
+    ensures
+        enumerate_iter(r) == i,
+        enumerate_count(r) == 0,
+;
+
+impl <I> IteratorSpecImpl for Enumerate<I>
+    where I: Iterator + IteratorSpec {
+
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        enumerate_iter(*self).obeys_prophetic_iter_laws()
+    }
+
+    // Item `k` of what's left to yield is the inner iterator's item `k`, tagged with
+    // the index it will be reached at: `count` items have been consumed already.
     #[verifier::prophetic]
-    pub open spec fn seq(self) -> Seq<I::Item> {
-        self.snapshot@.remaining()
+    open spec fn remaining(&self) -> Seq<(usize, I::Item)> {
+        let inner = enumerate_iter(*self).remaining();
+        Seq::new(inner.len(), |k: int| (((enumerate_count(*self) + k) as usize), inner[k]))
     }
 
-    // Keep the interface for history and seq the same
-    pub open spec fn history(self) -> Seq<I::Item> {
-        self.history@
-    }
-
-    pub open spec fn index(self) -> int {
-        self.index@
-    }
-
-    /// These properties help maintain the properties in wf,
-    /// but they don't need to be exposed to the client
     #[verifier::prophetic]
-    pub closed spec fn wf_inner(self) -> bool {
-        &&& self.iter.remaining().len() == self.seq().len() - self.index()
-        &&& forall |i| 0 <= i < self.iter.remaining().len() ==> #[trigger] self.iter.remaining()[i] == self.seq()[self.index() + i]
-        &&& self.iter.will_return_none() ==> self.snapshot@.will_return_none()
+    open spec fn will_return_none(&self) -> bool {
+        enumerate_iter(*self).will_return_none()
     }
 
-    /// These properties are needed for the client code to verify
-    #[verifier::prophetic]
-    pub open spec fn wf(self) -> bool {
-        &&& 0 <= self.index() <= self.seq().len()
-        &&& self.wf_inner()
-        &&& self.iter.obeys_prophetic_iter_laws() ==> {
-                &&& self.history@.len() == self.index()
-                &&& forall |i| 0 <= i < self.index() ==> #[trigger] self.history@[i] == self.seq()[i]
-            }
+    open spec fn decrease(&self) -> Option<nat> {
+        enumerate_iter(*self).decrease()
     }
 
-    /// Bundle the real iterator with its ghost state and loop invariants
-    pub fn new(iter: I) -> (s: Self)
-        ensures
-            s.index == 0,
-            s.snapshot == iter,
-            s.iter == iter,
-            s.history@ == Seq::<I::Item>::empty(),
-            s.wf(),
-    {
-        broadcast use lemma_seq_empty;
-        VerusForLoopWrapper {
-            index: Ghost(0),
-            snapshot: Ghost(iter),
-            iter,
-            history: Ghost(Seq::empty()),
+    open spec fn peek(&self, index: int) -> Option<(usize, I::Item)> {
+        match enumerate_iter(*self).peek(index) {
+            Some(v) => Some((((enumerate_count(*self) + index) as usize), v)),
+            None => None,
         }
-    }
-
-    /// Advance the underlying (real) iterator and prove
-    /// that the loop invariants are preserved.
-    pub fn next(&mut self) -> (ret: Option<I::Item>)
-        requires
-            old(self).wf(),
-        ensures
-            final(self).seq() == old(self).seq(),
-            final(self).index() == old(self).index() + if ret is Some { 1int } else { 0 },
-            final(self).snapshot == old(self).snapshot,
-            final(self).iter.obeys_prophetic_iter_laws() ==> final(self).wf(),
-            final(self).iter.obeys_prophetic_iter_laws() && ret is None ==>
-                final(self).snapshot@.will_return_none() && final(self).index() == final(self).seq().len(),
-            final(self).iter.obeys_prophetic_iter_laws() ==> (ret matches Some(r) ==>
-                r == old(self).seq()[old(self).index()]),
-            // History updates always hold
-            ret matches Some(i) ==> final(self).history@ == old(self).history@.push(i),
-            ret is None ==> final(self).history@ == old(self).history@,
-            // All of the standard Iterator::next guarantees still hold
-            exists |m: &mut I| #![auto] call_ensures(I::next, (m,), ret) && *m == old(self).iter && *final(m) == final(self).iter,
-    {
-        let ghost old_history = self.history@;
-        let ret = self.iter.next();
-        if ret.is_some() {
-            self.history = Ghost(old_history.push(ret->0));
-        }
-        proof {
-            broadcast use group_seq_lemmas;
-            if ret.is_some() {
-                self.index@ = self.index@ + 1;
-            }
-        }
-        ret
     }
 }
-
-// Artificial function used when we desguar a for loop.
-// It helps bring the definition of `peek` into scope,
-// resulting in better automation for some proofs.
-pub open spec fn trigger_peek_implications<T>(x: T) -> bool { true }
 
 /********************************************************************************
  * Definitions for `filter()`
@@ -1248,6 +1274,7 @@ pub broadcast group group_iter_axioms {
     copied_postcondition,
     cloned_postcondition,
     cloned_value_is_cloned,
+    enumerate_postcondition,
 }
 
 } // verus!
