@@ -3422,8 +3422,8 @@ test_verify_one_file_with_options! {
                     consume(t);
                 }
                 Foo::Bar(t) => {
-                    // TODO(new_mut_ref): (completeness) this should pass; the resolution goes to a "MatchIntermediate" position which gets dropped
-                    assert(has_resolved({b})); // FAILS
+                    // the resolution lands in a "MatchIntermediate" block and is forwarded here
+                    assert(has_resolved({b}));
                 }
             }
         }
@@ -3468,7 +3468,7 @@ test_verify_one_file_with_options! {
                 }
             }
         }
-    } => Err(err) => assert_fails(err, 3)
+    } => Err(err) => assert_fails(err, 2)
 }
 
 test_verify_one_file_with_options! {
@@ -4248,6 +4248,34 @@ test_verify_one_file_with_options! {
             *b1 = 12;
             assert(x == Option::Some((11, 12)));
             assert(false); // FAILS
+        }
+    } => Err(err) => assert_fails(err, 1)
+}
+
+test_verify_one_file_with_options! {
+    #[test] test_match_guard_mut_param_postcondition [] => verus_code! {
+        pub struct S { pub n: u64 }
+        impl S {
+            fn bump(&mut self)
+                requires old(self).n < 100,
+                ensures final(self).n == old(self).n + 1,
+            { self.n = self.n + 1; }
+
+            // a guarded arm mutating `self`: the fallthrough path's resolution of `self`
+            // lands in a MatchIntermediate block and must not be dropped
+            fn guarded(&mut self, x: u64) -> (r: u64)
+                requires old(self).n < 10,
+                ensures final(self).n >= old(self).n,
+            {
+                match x { 3 if x > 1 => { self.bump(); 1 }, _ => 0 }
+            }
+
+            fn guarded_false(&mut self, x: u64) -> (r: u64)
+                requires old(self).n < 10,
+                ensures final(self).n == old(self).n, // FAILS
+            {
+                match x { 3 if x > 1 => { self.bump(); 1 }, _ => 0 }
+            }
         }
     } => Err(err) => assert_fails(err, 1)
 }
