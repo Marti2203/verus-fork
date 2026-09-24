@@ -178,8 +178,9 @@ pub assume_specification<T, E: core::fmt::Debug>[ Result::<T, E>::unwrap ](
     result: Result<T, E>,
 ) -> (t: T)
     requires
-        result is Ok,
+        result is Ok || crate::pervasive::allow_panic(),
     ensures
+        result is Ok,
         t == result->Ok_0,
 ;
 
@@ -197,8 +198,9 @@ pub assume_specification<T: core::fmt::Debug, E>[ Result::<T, E>::unwrap_err ](
     result: Result<T, E>,
 ) -> (e: E)
     requires
-        result is Err,
+        result is Err || crate::pervasive::allow_panic(),
     ensures
+        result is Err,
         e == result->Err_0,
 ;
 
@@ -217,8 +219,9 @@ pub assume_specification<T, E: core::fmt::Debug>[ Result::<T, E>::expect ](
     msg: &str,
 ) -> (t: T)
     requires
-        result is Ok,
+        result is Ok || crate::pervasive::allow_panic(),
     ensures
+        result is Ok,
         t == result->Ok_0,
 ;
 

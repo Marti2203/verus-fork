@@ -185,14 +185,19 @@ pub assume_specification<T> [core::hint::must_use] (value: T) -> (ret: T)
         ret == value,
 ;
 
+// Panicking. By default reaching a panic must be proven impossible. With
+// vstd's `allow_panic` feature a panic is instead a way of NOT returning:
+// it unwinds, so nothing after it is reachable and no postcondition is owed.
+// That is the right reading for code whose panics are deliberate rejections
+// (a checker refusing its input) rather than bugs.
 pub assume_specification [core::panicking::panic] (s: &'static str) -> !
     requires
-        false,
+        crate::pervasive::allow_panic(),
 ;
 
 pub assume_specification [core::panicking::panic_fmt] (s: core::fmt::Arguments<'_>) -> !
     requires
-        false,
+        crate::pervasive::allow_panic(),
 ;
 
 // `assert_eq!` and `assert_ne!` expand to a call to `core::panicking::assert_failed`,
@@ -215,7 +220,7 @@ pub assume_specification<T, U>[ core::panicking::assert_failed::<T, U> ](
         T: core::fmt::Debug + ?Sized,
         U: core::fmt::Debug + ?Sized,
     requires
-        false,
+        crate::pervasive::allow_panic(),
 ;
 
 } // verus!
