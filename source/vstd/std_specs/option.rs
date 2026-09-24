@@ -159,8 +159,11 @@ pub open spec fn spec_unwrap<T>(option: Option<T>) -> T
 #[verifier::when_used_as_spec(spec_unwrap)]
 pub assume_specification<T>[ Option::<T>::unwrap ](option: Option<T>) -> (t: T)
     requires
-        option is Some,
+        option is Some || crate::pervasive::allow_panic(),
     ensures
+        // on `None` it panics (allowed only under `allow_panic`), so a return
+        // means `Some`
+        option is Some,
         t == spec_unwrap(option),
 ;
 
@@ -192,8 +195,9 @@ pub open spec fn spec_expect<T>(option: Option<T>, msg: &str) -> T
 #[verifier::when_used_as_spec(spec_expect)]
 pub assume_specification<T>[ Option::<T>::expect ](option: Option<T>, msg: &str) -> (t: T)
     requires
-        option is Some,
+        option is Some || crate::pervasive::allow_panic(),
     ensures
+        option is Some,
         t == spec_expect(option, msg),
 ;
 
