@@ -283,6 +283,24 @@ pub assume_specification<T: PartialEq>[ <[T]>::starts_with ](
         )),
 ;
 
+// contains
+pub open spec fn spec_slice_contains<T: PartialEq>(slice: &[T], x: &T) -> bool {
+    exists|i: int|
+        0 <= i < slice@.len() && #[trigger] <T as super::cmp::PartialEqSpec<T>>::eq_spec(
+            &slice@[i],
+            x,
+        )
+}
+
+#[verifier::when_used_as_spec(spec_slice_contains)]
+pub assume_specification<T: PartialEq>[ <[T]>::contains ](slice: &[T], x: &T) -> (result: bool)
+    ensures
+        <T as super::cmp::PartialEqSpec<T>>::obeys_eq_spec() ==> (result == spec_slice_contains(
+            slice,
+            x,
+        )),
+;
+
 // ends_with
 pub open spec fn spec_slice_ends_with<T: PartialEq>(slice: &[T], needle: &[T]) -> bool {
     &&& needle@.len() <= slice@.len()
