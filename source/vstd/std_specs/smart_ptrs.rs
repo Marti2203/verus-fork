@@ -108,6 +108,14 @@ pub assume_specification<T: Clone, A: Allocator + Clone>[ <Box<T, A> as Clone>::
         cloned::<T>(**b, *res),
 ;
 
+// Cloning an `Arc` shares the allocation: the clone is the same value.
+pub assume_specification<T: ?Sized, A: Allocator + Clone>[ <Arc<T, A> as Clone>::clone ](
+    a: &Arc<T, A>,
+) -> (res: Arc<T, A>)
+    ensures
+        res == *a,
+;
+
 pub assume_specification<T, A: Allocator>[ Rc::<T, A>::try_unwrap ](v: Rc<T, A>) -> (result: Result<
     T,
     Rc<T, A>,
