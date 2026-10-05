@@ -1187,6 +1187,7 @@ pub(crate) trait AstVisitor<R: Returner, Err, Scope: Scoper> {
             body,
             extra_dependencies,
             async_ret,
+            hidden,
         } = &function.x;
         let kind = self.visit_function_kind(kind)?;
         let type_bounds = self.visit_generic_bounds(typ_bounds)?;
@@ -1254,6 +1255,7 @@ pub(crate) trait AstVisitor<R: Returner, Err, Scope: Scoper> {
                 body: R::get_opt(body),
                 extra_dependencies: extra_dependencies.clone(),
                 async_ret: R::get_opt(async_ret),
+                hidden: hidden.clone(),
             })
         })
     }

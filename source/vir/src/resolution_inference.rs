@@ -3343,12 +3343,15 @@ fn get_resolutions_for_place(
     }
 }
 
-/// Emit a resolution at instruction `i` of `bb`. A `MatchIntermediate` block has no AST
-/// position to attach to (it is where a failed pattern and a failed guard rejoin before the
-/// next arm), so a resolution landing at its start is forwarded to the start of each
-/// successor instead. Nothing executes in between, so the place still holds the same value
-/// and is still safe to resolve there. Dropping it (as before) lost the resolution on every
-/// path through a guarded arm's fallthrough.
+/// Emit a resolution at instruction `i` of `bb`.
+///
+/// We special case the `MatchIntermediate` position because there's otherwise no good place
+/// to put it in the AST. To deal with it, we try to forward it to the successor blocks,
+/// which is sound to do if the successor block only has a single predecessor.
+/// (This can be seen from the dataflow equations.)
+/// However, this criterion doesn't always hold (See the
+/// `test_match_guard_asymmetric_mutation_no_panic` case)
+/// TODO (new_mut_ref) (completeness): Find a different solutio that works in all cases
 fn push_resolution(
     cfg: &CFG,
     place: &FlattenedPlace,
@@ -3360,6 +3363,10 @@ fn push_resolution(
     if matches!(position, AstPosition::MatchIntermediate)
         && i == 0
         && cfg.basic_blocks[bb].instructions.is_empty()
+        && cfg.basic_blocks[bb].successors.iter().all(|succ| {
+            cfg.basic_blocks[*succ].predecessors.as_slice() == [bb]
+                && !cfg.basic_blocks[*succ].is_entry
+        })
     {
         for succ in cfg.basic_blocks[bb].successors.iter() {
             push_resolution(cfg, place, *succ, 0, output);

@@ -73,9 +73,9 @@ pub enum ArithOp {
     Sub,
     /// IntRange::Int *
     Mul,
-    /// IntRange::Int / defined as Euclidean (round towards -infinity, not round-towards zero)
+    /// IntRange::Int / defined as Euclidean (round towards -infinity)
     EuclideanDiv,
-    /// IntRange::Int % defined as Euclidean (returns non-negative result even for negative divisor)
+    /// IntRange::Int % defined as Euclidean (returns non-negative result even for negative dividend)
     EuclideanMod,
 }
 
@@ -449,6 +449,7 @@ pub struct FunctionSstX {
     pub recommends_check: Option<Arc<FuncCheckSst>>,
     pub safe_api_check: Option<Arc<FuncCheckSst>>,
     pub async_ret: Option<Par>,
+    pub hidden: Arc<Vec<Fun>>,
 }
 
 pub type KrateSst = Arc<KrateSstX>;

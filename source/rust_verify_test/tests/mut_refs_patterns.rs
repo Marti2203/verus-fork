@@ -4253,7 +4253,7 @@ test_verify_one_file_with_options! {
 }
 
 test_verify_one_file_with_options! {
-    #[test] test_match_guard_mut_param_postcondition [] => verus_code! {
+    #[test] test_match_guard_mut_param_postcondition_pass [] => verus_code! {
         pub struct S { pub n: u64 }
         impl S {
             fn bump(&mut self)
@@ -4269,6 +4269,18 @@ test_verify_one_file_with_options! {
             {
                 match x { 3 if x > 1 => { self.bump(); 1 }, _ => 0 }
             }
+        }
+    } => Ok(())
+}
+
+test_verify_one_file_with_options! {
+    #[test] test_match_guard_mut_param_postcondition_fail [] => verus_code! {
+        pub struct S { pub n: u64 }
+        impl S {
+            fn bump(&mut self)
+                requires old(self).n < 100,
+                ensures final(self).n == old(self).n + 1,
+            { self.n = self.n + 1; }
 
             fn guarded_false(&mut self, x: u64) -> (r: u64)
                 requires old(self).n < 10,
@@ -4277,5 +4289,99 @@ test_verify_one_file_with_options! {
                 match x { 3 if x > 1 => { self.bump(); 1 }, _ => 0 }
             }
         }
-    } => Err(err) => assert_fails(err, 1)
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file_with_options! {
+    #[test] test_match_guard_mut_param_chained_guards [] => verus_code! {
+        pub struct S { pub n: u64 }
+        impl S {
+            fn bump(&mut self)
+                requires old(self).n < 100,
+                ensures final(self).n == old(self).n + 1,
+            { self.n = self.n + 1; }
+
+            // three guarded arms in a row chain three MatchIntermediate blocks - each
+            // failed guard's fallthrough must forward the resolution to the next
+            fn guarded_chain(&mut self, x: u64) -> (r: u64)
+                requires old(self).n < 10,
+                ensures final(self).n >= old(self).n,
+            {
+                match x {
+                    1 if x > 100 => { self.bump(); 1 },
+                    2 if x > 100 => { self.bump(); 2 },
+                    3 if x > 100 => { self.bump(); 3 },
+                    _ => 0,
+                }
+            }
+        }
+    } => Ok(())
+}
+
+test_verify_one_file_with_options! {
+    #[test] test_match_guard_asymmetric_mutation_no_panic [] => verus_code! {
+        pub struct Cs { pub n: u64 }
+        pub enum Op { A, B, Z }
+
+        // Test illustrates an example where a MatchIntermediate basic block (X)
+        // has a successor (Y) with a predecessor other than X (Z, when flag is false)
+        // This regression test exists because it was previously assumed that couldn't
+        // be the case.
+        fn f(op: Op, flag: bool, cs: &mut Cs)
+            requires old(cs).n < 100,
+        {
+            match op {
+                Op::A if flag => {
+                    cs.n = cs.n + 1;
+                },
+                /* X */ Op::B if flag /* Z */ => { },
+                /* Y */ _ => { },
+            }
+        }
+    } => Ok(())
+}
+
+test_verify_one_file_with_options! {
+    #[test] test_match_guard_asymmetric_mutation_soundness [] => verus_code! {
+        pub enum Op { A, B, Z }
+
+        fn f() {
+            let op = Op::B;
+            let mut x = 0;
+            let mut y = 0;
+            let mut z = 0;
+            let mut w = 0;
+            let mut v = 0;
+            let mut u = 0;
+            let mut refs = (&mut x, &mut y);
+            let mut refs2 = (&mut w, &mut z);
+
+            let flag1 = false;
+            let flag2 = false;
+
+            // This test indicates how we can get unsoundness with the above bug.
+            // Here, the match guard leaves `refs` uninitialized, meaning it's unsound
+            // to `assume(has_resolve(refs))` at the `_ => { }` line.
+            match op {
+                Op::A if flag1 => {
+                    *refs.0 = 20;
+                },
+                Op::B if ({ refs = (&mut v, &mut u); refs2 = refs; flag2 }) => { },
+                _ => { },
+            }
+
+            *refs2.0 = 30;
+
+            // This fails due to incompleteness
+            assert(x == 0); // FAILS
+            assert(y == 0);
+            assert(w == 0);
+            assert(z == 0);
+            assert(v == 30);
+            assert(u == 0);
+
+            // The point of the test is to make sure this fails:
+            assert(false); // FAILS
+        }
+    } => Err(err) => assert_fails(err, 2)
 }
