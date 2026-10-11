@@ -94,6 +94,14 @@ pub assume_specification<T, A: Allocator + Clone>[ <Arc<[T], A> as core::convert
         arc_contents(&r)@ == v@,
 ;
 
+// Collecting into an `Arc<[T]>` keeps the iterator's items, in order --
+// the twin of `Vec`'s `FromIteratorSpecImpl`.
+impl<T> super::iter::FromIteratorSpecImpl<T> for Arc<[T]> {
+    open spec fn from_iter_ensures(remaining: Seq<T>, s: Self) -> bool {
+        arc_contents(&s)@ == remaining
+    }
+}
+
 pub assume_specification<T: core::default::Default>[ <Arc<
     T,
 > as core::default::Default>::default ]() -> (res: Arc<T>)
