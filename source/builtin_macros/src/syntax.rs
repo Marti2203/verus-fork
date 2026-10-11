@@ -4254,9 +4254,13 @@ impl Visitor {
         let mut loop_expr: ExprLoop = parse_quote_spanned!(span => loop #body);
         loop_expr.label = label;
         loop_expr.attrs = attrs;
+        // The iterable is bound by a `match`, as Rust's own `for` desugaring
+        // does, not by a `let`: temporaries in `#expr` (e.g. the `Arc` behind
+        // `f().iter()`) then live as long as the loop that borrows them.
         let f = Expr::Verbatim(quote_spanned_vstd!(vstd, span => {
+            match #expr {
             #[allow(non_snake_case)]
-            let #x_verus_iter_init = #expr;
+            #x_verus_iter_init => {
             #[allow(non_snake_case)]
             let #x_exec_iter = ::core::iter::IntoIterator::into_iter(#x_verus_iter_init);
             #[allow(non_snake_case)]
@@ -4280,6 +4284,8 @@ impl Visitor {
                     #loop_expr
             };
             VERUS_loop_result
+            }
+            }
         }));
         let f = Expr::Verbatim(quote_spanned!(span => {
             #[verus::internal(loop_isolation_boundary)]

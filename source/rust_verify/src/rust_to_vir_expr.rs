@@ -4916,6 +4916,19 @@ fn loop_isolation_boundary_check(
         return Ok((*loop_isolation, label.clone()));
     }
 
+    // A `for` loop binds its iterable with a one-arm `match`, as Rust's own
+    // desugaring does (so temporaries in it outlive the loop):
+    // {
+    //   match e { x => { <the form below> } }
+    // }
+    if let ExprX::Match(_, arms, _) = &e.x {
+        if stmts.len() == 0 && arms.len() == 1 {
+            if let ExprX::Block(..) = &arms[0].x.body.x {
+                return loop_isolation_boundary_check(span, &arms[0].x.body);
+            }
+        }
+    }
+
     // Check that this block has the form:
     // {
     //   let x = match y { mut z => loop { } }; x

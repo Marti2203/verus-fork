@@ -1955,3 +1955,24 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_vir_error_msg(err, "`for` loops produced by a macro expansion")
 }
+
+test_verify_one_file! {
+    #[test] for_loop_temporary_in_iterable_lives verus_code! {
+        use vstd::prelude::*;
+        use std::sync::Arc;
+
+        fn mk() -> (r: Arc<Vec<u64>>)
+            ensures r@.len() == 2,
+        {
+            Arc::new(vec![1u64, 2])
+        }
+
+        fn test() {
+            // the `Arc` returned by `mk()` is a temporary borrowed by the
+            // iterator; it has to live as long as the loop (as in Rust's
+            // own `for` desugaring), not just the `let` that binds the iterable
+            for x in mk().iter() {
+            }
+        }
+    } => Ok(())
+}
