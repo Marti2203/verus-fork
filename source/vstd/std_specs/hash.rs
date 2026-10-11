@@ -1050,6 +1050,15 @@ pub assume_specification<Key>[ HashSet::<Key>::with_capacity ](capacity: usize) 
         m@ == Set::<Key>::empty(),
 ;
 
+// Collecting into a `HashSet` inserts the items in order, so for keys that
+// obey the model and a valid hasher the result is exactly the items' set --
+// `insert`'s specification, read item by item.
+impl<T, S> super::iter::FromIteratorSpecImpl<T> for HashSet<T, S> where T: Eq + Hash, S: BuildHasher + Default {
+    open spec fn from_iter_ensures(remaining: Seq<T>, s: Self) -> bool {
+        keys_obey_model::<T>(remaining.to_set()) && builds_valid_hashers::<S>() ==> s@ == remaining.to_set()
+    }
+}
+
 pub assume_specification<Key, S>[ HashSet::<Key, S>::with_hasher ](hash_builder: S) -> (m: HashSet<
     Key,
     S,
