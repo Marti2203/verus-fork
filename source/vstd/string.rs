@@ -178,6 +178,15 @@ pub broadcast proof fn to_string_from_display_ensures_for_str(t: &str, res: Stri
     admit();
 }
 
+/// A `Cow<str>` displays as its text.
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+pub broadcast proof fn to_string_from_display_ensures_for_cow_str<'a>(t: &alloc::borrow::Cow<'a, str>, res: String)
+    ensures
+        #[trigger] to_string_from_display_ensures::<alloc::borrow::Cow<'a, str>>(t, res) <==> (t@ == res@),
+{
+    admit();
+}
+
 #[cfg(all(feature = "alloc", not(verus_verify_core)))]
 pub assume_specification<T: core::fmt::Display + ?Sized>[ <T as ToString>::to_string ](
     t: &T,
@@ -333,6 +342,7 @@ pub broadcast group group_string_axioms {
     axiom_str_literal_len,
     axiom_str_literal_get_char,
     to_string_from_display_ensures_for_str,
+    to_string_from_display_ensures_for_cow_str,
     is_ascii_spec_bytes,
     is_ascii_concat,
 }
