@@ -626,8 +626,6 @@ pub assume_specification<Key, Value, S, A: Allocator>[ HashMap::<Key, Value, S, 
         len == spec_hash_map_len(m),
 ;
 
-/// A map can always hold at least what it currently holds, so `capacity` is at
-/// least `len`. Sibling of `len`/`is_empty` directly around it.
 pub assume_specification<Key, Value, S, A: Allocator>[ HashMap::<Key, Value, S, A>::capacity ](
     m: &HashMap<Key, Value, S, A>,
 ) -> (cap: usize)
@@ -679,11 +677,9 @@ pub assume_specification<Key, Value>[ HashMap::<Key, Value>::with_capacity ](cap
         m@ == Map::<Key, Value>::empty(),
 ;
 
-/// Sibling of `new`/`with_capacity`/`default` above, but generic in the hasher
-/// builder -- which is the whole point of `with_hasher`, and why the others do
-/// not cover it.
-pub assume_specification<Key, Value, S>[ HashMap::<Key, Value, S>::with_hasher ](hash_builder: S) -> (m:
-    HashMap<Key, Value, S>)
+pub assume_specification<Key, Value, S>[ HashMap::<Key, Value, S>::with_hasher ](
+    hash_builder: S,
+) -> (m: HashMap<Key, Value, S>)
     ensures
         m@ == Map::<Key, Value>::empty(),
 ;
@@ -1054,15 +1050,18 @@ pub assume_specification<Key>[ HashSet::<Key>::with_capacity ](capacity: usize) 
         m@ == Set::<Key>::empty(),
 ;
 
-/// Sibling of `new`/`with_capacity` above, but generic in the hasher builder --
-/// the same gap `HashMap::with_hasher` fills, and for the same reason: a set
-/// built with a custom `BuildHasher` had no specification at all, so
-/// `HashSet::with_hasher(..)` could not be used in `verus!` even to make an
-/// empty one.
 pub assume_specification<Key, S>[ HashSet::<Key, S>::with_hasher ](hash_builder: S) -> (m: HashSet<
     Key,
     S,
 >)
+    ensures
+        m@ == Set::<Key>::empty(),
+;
+
+pub assume_specification<Key, S>[ HashSet::<Key, S>::with_capacity_and_hasher ](
+    capacity: usize,
+    hash_builder: S,
+) -> (m: HashSet<Key, S>)
     ensures
         m@ == Set::<Key>::empty(),
 ;

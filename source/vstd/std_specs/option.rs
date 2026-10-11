@@ -228,9 +228,6 @@ pub assume_specification<'a, T: Clone>[ Option::<&'a T>::cloned ](opt: Option<&'
 ;
 
 // copied
-//
-// Stronger than `cloned` above: `Copy` makes the result EQUAL to the referent,
-// where `Clone` only relates them through the `cloned` predicate.
 pub assume_specification<'a, T: Copy>[ Option::<&'a T>::copied ](opt: Option<&'a T>) -> (res:
     Option<T>)
     ensures
