@@ -47,6 +47,7 @@ pub assume_specification[ Thread::id ](t: &Thread) -> ThreadId
 ;
 
 pub assume_specification[ std::thread::park ]()
+    no_unwind
 ;
 
 pub assume_specification[ Thread::unpark ](t: &Thread)
@@ -66,6 +67,7 @@ pub assume_specification[ Barrier::new ](n: usize) -> Barrier
 ;
 
 pub assume_specification[ Barrier::wait ](b: &Barrier) -> BarrierWaitResult
+    no_unwind
 ;
 
 pub assume_specification[ BarrierWaitResult::is_leader ](r: &BarrierWaitResult) -> bool
