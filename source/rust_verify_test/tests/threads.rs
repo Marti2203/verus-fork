@@ -77,3 +77,86 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] sync_primitives verus_code! {
+        use vstd::rwlock::RwLockPredicate;
+        use vstd::sync::*;
+        use vstd::thread::*;
+
+        struct Even;
+        impl RwLockPredicate<u64> for Even {
+            open spec fn inv(self, v: u64) -> bool { v % 2 == 0 }
+        }
+
+        fn mutex() -> (r: u64)
+            ensures r % 2 == 0
+        {
+            let m = Mutex::<u64, Even>::new(0, Ghost(Even));
+            let cv = Condvar::new();
+            scope(|s: Scope| {
+                let h = s.spawn(|| {
+                    let (v, g) = m.lock();
+                    g.release(if v < 1000 { v + 2 } else { 0 });
+                    cv.notify_all();
+                });
+                let (v, g) = m.lock();
+                let (v, g) = cv.wait(g, v);
+                g.release(v);
+                let _ = h.join();
+            });
+            m.into_inner()
+        }
+
+        fn chan() {
+            let (tx, rx) = channel::<u64, Even>(Ghost(Even));
+            let h = spawn(move || { let _ = tx.send(4); });
+            if let Ok(v) = rx.recv() {
+                assert(v % 2 == 0);
+            }
+            let _ = h.join();
+        }
+
+        fn barrier() {
+            let b = std::sync::Barrier::new(1);
+            let _ = b.wait().is_leader();
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] sync_primitives_fail verus_code! {
+        use vstd::rwlock::RwLockPredicate;
+        use vstd::sync::*;
+
+        struct Even;
+        impl RwLockPredicate<u64> for Even {
+            open spec fn inv(self, v: u64) -> bool { v % 2 == 0 }
+        }
+
+        fn release_bad(m: &Mutex<u64, Even>) {
+            let (v, g) = m.lock();
+            g.release(3); // FAILS
+        }
+
+        fn lock_only_inv(m: &Mutex<u64, Even>) {
+            let (v, g) = m.lock();
+            assert(v == 0); // FAILS
+            g.release(v);
+        }
+
+        fn send_bad(tx: &Sender<u64, Even>)
+            requires tx.pred() == Even,
+        {
+            let _ = tx.send(5); // FAILS
+        }
+
+        fn recv_only_inv(rx: &Receiver<u64, Even>)
+            requires rx.pred() == Even,
+        {
+            if let Ok(v) = rx.recv() {
+                assert(v == 2); // FAILS
+            }
+        }
+    } => Err(err) => assert_fails(err, 4)
+}

@@ -87,6 +87,8 @@ pub mod slice;
 pub mod state_machine_internal;
 pub mod string;
 #[cfg(feature = "std")]
+pub mod sync;
+#[cfg(feature = "std")]
 pub mod thread;
 pub mod tokens;
 pub mod utf8;
