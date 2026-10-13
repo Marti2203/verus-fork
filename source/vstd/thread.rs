@@ -22,6 +22,12 @@ impl<Ret> JoinHandle<Ret> {
     /// postcondition of the closure provided when calling `spawn()`.
     pub uninterp spec fn predicate(&self, ret: Ret) -> bool;
 
+    /// Checks whether the thread has finished, without blocking.
+    #[verifier::external_body]
+    pub fn is_finished(&self) -> bool {
+        self.handle.is_finished()
+    }
+
     /// Wait for a thread to complete.
     #[verifier::external_body]
     pub fn join(self) -> (r_result: Result<Ret, ()>)
@@ -153,6 +159,12 @@ impl<'scope, Ret> ScopedJoinHandle<'scope, Ret> {
     /// Predicate restricting the possible return values. This is determined by the
     /// postcondition of the closure provided when calling `Scope::spawn()`.
     pub uninterp spec fn predicate(&self, ret: Ret) -> bool;
+
+    /// Checks whether the thread has finished, without blocking.
+    #[verifier::external_body]
+    pub fn is_finished(&self) -> bool {
+        self.handle.is_finished()
+    }
 
     /// Wait for a thread to complete.
     #[verifier::external_body]

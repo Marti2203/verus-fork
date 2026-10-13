@@ -1,9 +1,10 @@
 #![allow(unused_imports)]
 use super::super::prelude::*;
 use core::time::Duration;
+use std::sync::{Barrier, BarrierWaitResult};
 use std::thread::{LocalKey, Thread, ThreadId};
 
-// Specs for std::thread functions other than spawning.
+// Specs for std::thread functions other than spawning, and std::sync::Barrier.
 // For spawning threads, see `vstd::thread`.
 verus! {
 
@@ -44,6 +45,34 @@ pub assume_specification[ std::thread::current ]() -> Thread
 ;
 
 pub assume_specification[ Thread::id ](t: &Thread) -> ThreadId
+    no_unwind
+;
+
+pub assume_specification[ std::thread::park ]()
+    no_unwind
+;
+
+pub assume_specification[ Thread::unpark ](t: &Thread)
+    no_unwind
+;
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExBarrier(Barrier);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExBarrierWaitResult(BarrierWaitResult);
+
+pub assume_specification[ Barrier::new ](n: usize) -> Barrier
+    no_unwind
+;
+
+pub assume_specification[ Barrier::wait ](b: &Barrier) -> BarrierWaitResult
+    no_unwind
+;
+
+pub assume_specification[ BarrierWaitResult::is_leader ](r: &BarrierWaitResult) -> bool
     no_unwind
 ;
 
