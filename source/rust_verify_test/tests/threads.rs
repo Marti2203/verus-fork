@@ -187,3 +187,100 @@ test_verify_one_file! {
         vstd::thread_local! { static X: Pos = Pos { x: 0 }; }
     } => Err(err) => assert_vir_error_msg(err, "may fail to meet its declared type invariant")
 }
+
+test_verify_one_file! {
+    #[test] sync_more verus_code! {
+        use vstd::rwlock::RwLockPredicate;
+        use vstd::sync::*;
+        use vstd::thread::*;
+        use std::time::Duration;
+
+        struct Even;
+        impl RwLockPredicate<u64> for Even {
+            open spec fn inv(self, v: u64) -> bool { v % 2 == 0 }
+        }
+
+        fn rwlock() -> (r: u64)
+            ensures r % 2 == 0
+        {
+            let l = RwLock::<u64, Even>::new(2, Ghost(Even));
+            {
+                let r = l.read();
+                let x = *r.borrow();
+                assert(x % 2 == 0);
+            }
+            let (v, w) = l.write();
+            w.release(if v < 1000 { v + 2 } else { 0 });
+            l.into_inner()
+        }
+
+        fn try_lock_timeout(m: &Mutex<u64, Even>, cv: &Condvar) {
+            if let Some((v, g)) = m.try_lock() {
+                assert(v % 2 == 0);
+                let (v, g, _timed_out) = cv.wait_timeout(g, v, Duration::from_millis(1));
+                g.release(v);
+            }
+        }
+
+        fn once() {
+            let c = OnceLock::<u64, Even>::new(Ghost(Even));
+            let _ = c.set(4);
+            let v = c.get_or_init(|| -> (r: u64) ensures r == 6 { 6 });
+            assert(*v % 2 == 0);
+            if let Some(v) = c.get() {
+                assert(*v % 2 == 0);
+            }
+        }
+
+        fn bounded() {
+            let (tx, rx) = sync_channel::<u64, Even>(1, Ghost(Even));
+            let h = spawn(move || { let _ = tx.send(8); let _ = tx.try_send(10); });
+            if let Some(v) = rx.recv_timeout(Duration::from_secs(1)) {
+                assert(v % 2 == 0);
+            }
+            let _ = h.join();
+        }
+
+        fn misc() {
+            let h = spawn(|| {});
+            let _n = h.thread().name();
+            std::thread::park_timeout(Duration::from_millis(1));
+            let _ = h.join();
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] sync_more_fail verus_code! {
+        use vstd::rwlock::RwLockPredicate;
+        use vstd::sync::*;
+
+        struct Even;
+        impl RwLockPredicate<u64> for Even {
+            open spec fn inv(self, v: u64) -> bool { v % 2 == 0 }
+        }
+
+        fn write_release_bad(l: &RwLock<u64, Even>) {
+            let (v, w) = l.write();
+            w.release(1); // FAILS
+        }
+
+        fn read_only_inv(l: &RwLock<u64, Even>) {
+            let r = l.read();
+            let x = *r.borrow();
+            assert(x == 2); // FAILS
+        }
+
+        fn once_set_bad(c: &OnceLock<u64, Even>) {
+            let _ = c.set(3); // FAILS
+        }
+
+        fn once_init_bad(c: &OnceLock<u64, Even>) {
+            let _ = c.get_or_init(|| -> (r: u64) ensures r == 3 { 3 }); // FAILS
+        }
+
+        fn try_send_bad(tx: &SyncSender<u64, Even>) {
+            let _ = tx.try_send(5); // FAILS
+        }
+    } => Err(err) => assert_fails(err, 5)
+}

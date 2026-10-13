@@ -46,7 +46,15 @@ pub assume_specification[ Thread::id ](t: &Thread) -> ThreadId
     no_unwind
 ;
 
+pub assume_specification[ Thread::name ](t: &Thread) -> Option<&str>
+    no_unwind
+;
+
 pub assume_specification[ std::thread::park ]()
+    no_unwind
+;
+
+pub assume_specification[ std::thread::park_timeout ](dur: Duration)
     no_unwind
 ;
 

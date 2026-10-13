@@ -28,6 +28,12 @@ impl<Ret> JoinHandle<Ret> {
         self.handle.is_finished()
     }
 
+    /// The spawned thread.
+    #[verifier::external_body]
+    pub fn thread(&self) -> &std::thread::Thread {
+        self.handle.thread()
+    }
+
     /// Wait for a thread to complete.
     #[verifier::external_body]
     pub fn join(self) -> (r_result: Result<Ret, ()>)
@@ -208,6 +214,12 @@ impl<'scope, Ret> ScopedJoinHandle<'scope, Ret> {
     #[verifier::external_body]
     pub fn is_finished(&self) -> bool {
         self.handle.is_finished()
+    }
+
+    /// The spawned thread.
+    #[verifier::external_body]
+    pub fn thread(&self) -> &std::thread::Thread {
+        self.handle.thread()
     }
 
     /// Wait for a thread to complete.
