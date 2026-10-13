@@ -421,3 +421,33 @@ impl<V: Sync> ThreadShareable<V> {
 }
 
 } // verus!
+/// Declares thread-local keys that verified code can use, like
+/// [`std::thread_local!`](https://doc.rust-lang.org/std/macro.thread_local.html).
+///
+/// Values are accessed with [`LocalKey::with`](std::thread::LocalKey::with), whose
+/// closure must work for any value, since the value of a thread-local is not specified.
+///
+/// ### Example
+///
+/// ```rust,ignore
+/// vstd::thread_local! { static LIMIT: u64 = 10; }
+///
+/// fn get_limit() -> u64 {
+///     LIMIT.with(|l: &u64| *l)
+/// }
+/// ```
+#[macro_export]
+macro_rules! thread_local {
+    ($($(#[$attr:meta])* $vis:vis static $name:ident: $t:ty = $init:expr;)*) => {
+        $crate::vstd::prelude::verus! {
+            $(
+                #[verifier::external_body]
+                $(#[$attr])*
+                $vis const $name: ::std::thread::LocalKey<$t> = {
+                    ::std::thread_local! { static INNER: $t = $init; }
+                    INNER
+                };
+            )*
+        }
+};
+}

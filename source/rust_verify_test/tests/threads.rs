@@ -74,21 +74,16 @@ test_verify_one_file! {
         use vstd::prelude::*;
         use std::time::Duration;
 
-        std::thread_local! { static LIMIT: u64 = 10; }
-
-        #[verifier::external_body]
-        fn limit() -> &'static std::thread::LocalKey<u64> {
-            &LIMIT
-        }
+        vstd::thread_local! { static LIMIT: u64 = 10; }
 
         fn test() {
             std::thread::sleep(Duration::from_millis(1));
             std::thread::yield_now();
             let _id = std::thread::current().id();
             let _n = std::thread::available_parallelism();
-            let r = limit().with(|l: &u64| -> (r: u64) ensures r < 100 { if *l < 100 { *l } else { 0 } });
+            let r = LIMIT.with(|l: &u64| -> (r: u64) ensures r < 100 { if *l < 100 { *l } else { 0 } });
             assert(r < 100);
-            let r = limit().with(|l: &u64| *l);
+            let r = LIMIT.with(|l: &u64| *l);
             assert(r == 10); // FAILS
         }
     } => Err(err) => assert_one_fails(err)

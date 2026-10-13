@@ -93,8 +93,7 @@ pub assume_specification[ std::thread::available_parallelism ]() -> std::io::Res
 pub struct ExLocalKey<T: 'static>(LocalKey<T>);
 
 // Panics if the thread-local has been destroyed (i.e. during thread teardown).
-// A `thread_local!` key is external to Verus, so access it through an
-// `external_body` function returning `&'static LocalKey<T>`.
+// Declare keys with `vstd::thread_local!`; keys from `std::thread_local!` are external.
 pub assume_specification<T: 'static, F: FnOnce(&T) -> R, R>[ LocalKey::<T>::with ](
     key: &'static LocalKey<T>,
     f: F,
