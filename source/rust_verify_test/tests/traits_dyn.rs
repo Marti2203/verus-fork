@@ -541,7 +541,7 @@ test_verify_one_file! {
         trait T {}
         fn test(d: &(dyn T + Send)) {
         }
-    } => Err(err) => assert_vir_error_msg(err, "The verifier does not yet support the following Rust feature: dyn with more that one trait")
+    } => Err(err) => assert_vir_error_msg(err, "The verifier does not yet support the following Rust feature: dyn with auto traits (such as `Send`) or associated type bounds")
 }
 
 test_verify_one_file! {
@@ -549,7 +549,7 @@ test_verify_one_file! {
         trait T {}
         fn test(d: &dyn Fn() -> ()) {
         }
-    } => Err(err) => assert_vir_error_msg(err, "The verifier does not yet support the following Rust feature: dyn with more that one trait")
+    } => Err(err) => assert_vir_error_msg(err, "The verifier does not yet support the following Rust feature: dyn with auto traits (such as `Send`) or associated type bounds")
 }
 
 test_verify_one_file! {

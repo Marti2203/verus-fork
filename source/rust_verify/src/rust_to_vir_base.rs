@@ -1420,7 +1420,7 @@ pub(crate) fn mid_ty_to_vir_ghost<'tcx>(
         TyKind::Dynamic(preds, _) => {
             use rustc_middle::ty::ExistentialPredicate;
             if preds.len() != 1 {
-                unsupported_err!(span, "dyn with more that one trait");
+                unsupported_err!(span, "dyn with auto traits (such as `Send`) or associated type bounds");
             }
             match preds[0].skip_binder() {
                 ExistentialPredicate::Trait(trait_ref) => {
