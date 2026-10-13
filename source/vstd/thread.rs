@@ -196,7 +196,7 @@ impl<'scope, 'env> Scope<'scope, 'env> {
 /// ### Example
 ///
 /// ```rust,ignore
-/// fn sum_halves(v: &Vec<u64>) {
+/// fn len_in_thread(v: &Vec<u64>) {
 ///     scope(|s: Scope| {
 ///         let h = s.spawn(|| -> (r: usize) ensures r == v.len() { v.len() });
 ///         if let Ok(n) = h.join() {
