@@ -132,6 +132,100 @@ pub fn spawn<F, Ret>(f: F) -> (handle: JoinHandle<Ret>) where
     }
 }
 
+/// Scope for spawning threads that can borrow from the enclosing function.
+/// (Wrapper around [`std::thread::Scope`](https://doc.rust-lang.org/std/thread/struct.Scope.html).)
+///
+/// See the documentation of [`scope()`](scope) for more details.
+#[verifier::external_body]
+pub struct Scope<'scope, 'env: 'scope> {
+    scope: &'scope std::thread::Scope<'scope, 'env>,
+}
+
+/// Object returned by [`Scope::spawn()`](Scope::spawn) to allow thread joining.
+/// (Wrapper around [`std::thread::ScopedJoinHandle`](https://doc.rust-lang.org/std/thread/struct.ScopedJoinHandle.html).)
+#[verifier::external_body]
+#[verifier::reject_recursive_types(Ret)]
+pub struct ScopedJoinHandle<'scope, Ret> {
+    handle: std::thread::ScopedJoinHandle<'scope, Ret>,
+}
+
+impl<'scope, Ret> ScopedJoinHandle<'scope, Ret> {
+    /// Predicate restricting the possible return values. This is determined by the
+    /// postcondition of the closure provided when calling `Scope::spawn()`.
+    pub uninterp spec fn predicate(&self, ret: Ret) -> bool;
+
+    /// Wait for a thread to complete.
+    #[verifier::external_body]
+    pub fn join(self) -> (r_result: Result<Ret, ()>)
+        ensures
+            match r_result {
+                Result::Ok(r) => self.predicate(r),
+                Result::Err(_) => true,
+            },
+    {
+        match self.handle.join() {
+            Ok(v) => Ok(v),
+            Err(_) => Err(()),
+        }
+    }
+}
+
+impl<'scope, 'env> Scope<'scope, 'env> {
+    /// Spawns a scoped thread, like [`spawn()`](spawn), except that the closure
+    /// may borrow from outside the scope.
+    #[verifier::external_body]
+    pub fn spawn<F, Ret>(&self, f: F) -> (handle: ScopedJoinHandle<'scope, Ret>) where
+        F: FnOnce() -> Ret,
+        F: Send + 'scope,
+        Ret: Send + 'scope,
+
+        requires
+            f.requires(()),
+        ensures
+            forall|ret: Ret| #[trigger] handle.predicate(ret) ==> f.ensures((), ret),
+    {
+        ScopedJoinHandle { handle: self.scope.spawn(f) }
+    }
+}
+
+/// Creates a scope for spawning threads that can borrow from the enclosing function.
+/// (Wrapper around [`std::thread::scope`](https://doc.rust-lang.org/std/thread/fn.scope.html).)
+///
+/// All threads spawned in the scope are joined before `scope` returns.
+///
+/// ### Example
+///
+/// ```rust,ignore
+/// fn sum_halves(v: &Vec<u64>) {
+///     scope(|s: Scope| {
+///         let h = s.spawn(|| -> (r: usize) ensures r == v.len() { v.len() });
+///         if let Ok(n) = h.join() {
+///             assert(n == v.len());
+///         }
+///     });
+/// }
+/// ```
+#[verifier::external_body]
+pub fn scope<'env, F, Ret>(f: F) -> (ret: Ret) where
+    F: for <'scope>FnOnce(Scope<'scope, 'env>) -> Ret,
+
+    requires
+        forall|s: Scope| #[trigger] f.requires((s,)),
+    ensures
+        exists|s: Scope| #[trigger] f.ensures((s,), ret),
+{
+    let res = std::panic::catch_unwind(
+        std::panic::AssertUnwindSafe(|| std::thread::scope(|s| f(Scope { scope: s }))),
+    );
+    match res {
+        Ok(res) => res,
+        Err(_) => {
+            println!("panic in scope");
+            std::process::abort();
+        },
+    }
+}
+
 /// Wrapper around Rust's
 /// [`ThreadId`](https://doc.rust-lang.org/std/thread/struct.ThreadId.html)
 /// object. This is an opaque type.
