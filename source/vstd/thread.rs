@@ -248,6 +248,7 @@ impl<'scope, 'env> Scope<'scope, 'env> {
 /// (Wrapper around [`std::thread::scope`](https://doc.rust-lang.org/std/thread/fn.scope.html).)
 ///
 /// All threads spawned in the scope are joined before `scope` returns.
+/// If any of them panicked, the program aborts, even if that thread was joined.
 ///
 /// ### Example
 ///
@@ -441,10 +442,23 @@ macro_rules! thread_local {
     ($($(#[$attr:meta])* $vis:vis static $name:ident: $t:ty = $init:expr;)*) => {
         $crate::vstd::prelude::verus! {
             $(
+                // The initializer is verified here; only the key itself is external
+                #[allow(non_snake_case)]
+                mod $name {
+                    #[allow(unused_imports)]
+                    use super::*;
+
+                    pub(super) fn __vstd_thread_local_init() -> $t {
+                        $init
+                    }
+                }
+
                 #[verifier::external_body]
                 $(#[$attr])*
                 $vis const $name: ::std::thread::LocalKey<$t> = {
-                    ::std::thread_local! { static INNER: $t = $init; }
+                    ::std::thread_local! {
+                        static INNER: $t = $name::__vstd_thread_local_init();
+                    }
                     INNER
                 };
             )*

@@ -17,7 +17,8 @@ verus! {
 /// [`MutexGuard::release`], which requires the predicate to hold again.
 ///
 /// **Warning:** The lock is _NOT_ released if the guard is dropped without calling
-/// [`MutexGuard::release`]; later calls to `lock` will block forever.
+/// [`MutexGuard::release`]; later calls to `lock` will block forever, and
+/// [`into_inner`](Mutex::into_inner) will abort.
 #[verifier::external_body]
 #[verifier::reject_recursive_types(V)]
 #[verifier::reject_recursive_types(Pred)]

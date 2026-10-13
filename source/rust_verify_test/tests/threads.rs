@@ -171,3 +171,19 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_fails(err, 4)
 }
+
+test_verify_one_file! {
+    #[test] thread_local_init_is_verified verus_code! {
+        use vstd::prelude::*;
+
+        pub struct Pos { x: u64 }
+
+        impl Pos {
+            #[verifier::type_invariant]
+            spec fn wf(self) -> bool { self.x > 0 }
+        }
+
+        // The initializer is verified (the `// FAILS` marker is lost inside the macro call)
+        vstd::thread_local! { static X: Pos = Pos { x: 0 }; }
+    } => Err(err) => assert_vir_error_msg(err, "may fail to meet its declared type invariant")
+}
