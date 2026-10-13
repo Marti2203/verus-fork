@@ -138,6 +138,50 @@ pub fn spawn<F, Ret>(f: F) -> (handle: JoinHandle<Ret>) where
     }
 }
 
+/// Thread factory for configuring the name and stack size of a new thread.
+/// (Wrapper around [`std::thread::Builder`](https://doc.rust-lang.org/std/thread/struct.Builder.html).)
+#[verifier::external_body]
+pub struct Builder {
+    builder: std::thread::Builder,
+}
+
+impl Builder {
+    #[verifier::external_body]
+    pub fn new() -> Builder {
+        Builder { builder: std::thread::Builder::new() }
+    }
+
+    #[verifier::external_body]
+    pub fn name(self, name: String) -> Builder {
+        Builder { builder: self.builder.name(name) }
+    }
+
+    #[verifier::external_body]
+    pub fn stack_size(self, size: usize) -> Builder {
+        Builder { builder: self.builder.stack_size(size) }
+    }
+
+    /// Spawns a thread, like [`spawn()`](spawn), but fails instead of panicking
+    /// if the thread cannot be created.
+    #[verifier::external_body]
+    pub fn spawn<F, Ret>(self, f: F) -> (res: Result<JoinHandle<Ret>, ()>) where
+        F: FnOnce() -> Ret,
+        F: Send + 'static,
+        Ret: Send + 'static,
+
+        requires
+            f.requires(()),
+        ensures
+            res matches Ok(handle) ==> forall|ret: Ret| #[trigger]
+                handle.predicate(ret) ==> f.ensures((), ret),
+    {
+        match self.builder.spawn(f) {
+            Ok(handle) => Ok(JoinHandle { handle }),
+            Err(_) => Err(()),
+        }
+    }
+}
+
 /// Scope for spawning threads that can borrow from the enclosing function.
 /// (Wrapper around [`std::thread::Scope`](https://doc.rust-lang.org/std/thread/struct.Scope.html).)
 ///

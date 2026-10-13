@@ -54,6 +54,22 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
+    #[test] thread_builder verus_code! {
+        use vstd::thread::*;
+
+        fn test() {
+            let b = Builder::new().name("worker".to_string()).stack_size(1 << 24);
+            if let Ok(h) = b.spawn(move || -> (r: u64) ensures r == 7 { 7 }) {
+                if let Ok(v) = h.join() {
+                    assert(v == 7);
+                    assert(v == 8); // FAILS
+                }
+            }
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
     #[test] thread_misc verus_code! {
         use vstd::prelude::*;
         use std::time::Duration;
