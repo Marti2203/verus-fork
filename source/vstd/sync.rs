@@ -87,9 +87,13 @@ impl<V, Pred: RwLockPredicate<V>> Mutex<V, Pred> {
         ensures
             self.inv(v),
     {
-        match self.inner.into_inner() {
-            Ok(Some(v)) => v,
-            _ => std::process::abort(),
+        let val = match self.inner.into_inner() {
+            Ok(v) => v,
+            Err(e) => e.into_inner(),
+        };
+        match val {
+            Some(v) => v,
+            None => std::process::abort(),
         }
     }
 }
@@ -195,9 +199,13 @@ impl<V, Pred: RwLockPredicate<V>> RwLock<V, Pred> {
         ensures
             self.inv(v),
     {
-        match self.inner.into_inner() {
-            Ok(Some(v)) => v,
-            _ => std::process::abort(),
+        let val = match self.inner.into_inner() {
+            Ok(v) => v,
+            Err(e) => e.into_inner(),
+        };
+        match val {
+            Some(v) => v,
+            None => std::process::abort(),
         }
     }
 }
