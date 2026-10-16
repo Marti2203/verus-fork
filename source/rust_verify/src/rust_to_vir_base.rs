@@ -21,7 +21,7 @@ use rustc_span::def_id::{CrateNum, DefId};
 use rustc_span::symbol::{Ident, kw};
 use rustc_trait_selection::infer::InferCtxtExt;
 use rustc_trait_selection::solve::BuiltinImplSource;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
 use vir::ast::{
@@ -1669,32 +1669,41 @@ pub(crate) fn ty_pair_has_smt_equality<'tcx>(
     }
 }
 
-/// Does matching a constant or literal pattern of this type agree with the SMT solver's ==?
-/// rustc matches such constants field by field (it requires derived PartialEq), so this
-/// holds unless some leaf is a float or pointer.
+/// Does matching a literal or constant pattern of this type agree with SMT ==?
+/// rustc compares such constants field by field, so yes unless a leaf is a float or pointer.
 pub(crate) fn ty_has_pattern_smt_equality<'tcx>(
     bctx: &BodyCtxt<'tcx>,
     ty: rustc_middle::ty::Ty<'tcx>,
 ) -> bool {
-    pattern_smt_equality_rec(bctx, ty, &mut Vec::new())
+    pattern_smt_equality_rec(bctx, ty, &mut HashSet::new(), 0)
 }
+
+// Bounds the recursion on polymorphically recursive types
+const PATTERN_SMT_EQUALITY_MAX_DEPTH: usize = 32;
 
 fn pattern_smt_equality_rec<'tcx>(
     bctx: &BodyCtxt<'tcx>,
     ty: rustc_middle::ty::Ty<'tcx>,
-    visiting: &mut Vec<rustc_middle::ty::Ty<'tcx>>,
+    seen: &mut HashSet<rustc_middle::ty::Ty<'tcx>>,
+    depth: usize,
 ) -> bool {
     use rustc_middle::ty::TyKind;
     let tcx = bctx.ctxt.tcx;
+    if depth > PATTERN_SMT_EQUALITY_MAX_DEPTH {
+        return false;
+    }
+    // A type seen before is either being checked or passed (any failure ends the whole check)
+    if !seen.insert(ty) {
+        return true;
+    }
+    let rec = |t, seen: &mut HashSet<_>| pattern_smt_equality_rec(bctx, t, seen, depth + 1);
     match ty.kind() {
         TyKind::Bool | TyKind::Char | TyKind::Int(_) | TyKind::Uint(_) | TyKind::Str => true,
-        TyKind::Ref(_, t, _) | TyKind::Array(t, _) | TyKind::Slice(t) => {
-            pattern_smt_equality_rec(bctx, *t, visiting)
-        }
-        TyKind::Tuple(ts) => ts.iter().all(|t| pattern_smt_equality_rec(bctx, t, visiting)),
+        TyKind::Ref(_, t, _) | TyKind::Array(t, _) | TyKind::Slice(t) => rec(*t, seen),
+        TyKind::Tuple(ts) => ts.iter().all(|t| rec(t, seen)),
         TyKind::Param(_) => implements_structural(bctx, ty),
         TyKind::Adt(adt_def, args) => {
-            if implements_structural(bctx, ty) || visiting.contains(&ty) {
+            if implements_structural(bctx, ty) {
                 return true;
             }
             let Some(structural_peq) = tcx.lang_items().structural_peq_trait() else {
@@ -1714,14 +1723,17 @@ fn pattern_smt_equality_rec<'tcx>(
             {
                 return false;
             }
-            visiting.push(ty);
             let typing_env = TypingEnv::post_analysis(tcx, bctx.fun_id);
-            let ok = adt_def.all_fields().all(|f| {
+            adt_def.all_fields().all(|f| {
+                // Spec == compares ghost and tracked fields, which can differ from their runtime value
+                #[allow(deprecated)]
+                let attrs = tcx.get_all_attrs(f.did);
+                if crate::attributes::get_mode(Mode::Exec, attrs) != Mode::Exec {
+                    return false;
+                }
                 let fty = tcx.normalize_erasing_regions(typing_env, f.ty(tcx, args));
-                pattern_smt_equality_rec(bctx, fty, visiting)
-            });
-            visiting.pop();
-            ok
+                rec(fty, seen)
+            })
         }
         _ => false,
     }

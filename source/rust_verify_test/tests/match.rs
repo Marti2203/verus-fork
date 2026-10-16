@@ -1741,3 +1741,26 @@ test_verify_one_file! {
         "equality-testing this type in pattern: (u8, f32)",
     ])
 }
+
+test_verify_one_file! {
+    #[test] ghost_field_patterns verus_code! {
+        #[derive(PartialEq, Eq)]
+        pub struct S { pub b: u8, pub ghost a: u8 }
+        const C: S = S { b: 0, a: 5 };
+
+        fn m(s: S) -> (r: bool)
+            ensures r ==> s.a == 5
+        {
+            match s { C => true, _ => false }
+        }
+
+        #[derive(PartialEq, Eq)]
+        pub enum T<A: 'static> { Leaf(A), Node(&'static T<(A, A)>) }
+        const L: T<u8> = T::Leaf(0);
+
+        fn n(v: T<u8>) -> bool { match v { L => true, _ => false } }
+    } => Err(err) => assert_vir_error_msgs(err, &[
+        "equality-testing this type in pattern: S",
+        "equality-testing this type in pattern: T<u8>",
+    ])
+}
