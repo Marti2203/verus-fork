@@ -1648,14 +1648,6 @@ pub(crate) fn is_smt_equality<'tcx>(
     ty_pair_has_smt_equality(bctx, span, ty1, ty2)
 }
 
-pub(crate) fn ty_has_smt_equality<'tcx>(
-    bctx: &BodyCtxt<'tcx>,
-    span: Span,
-    ty: rustc_middle::ty::Ty<'tcx>,
-) -> Result<bool, VirErr> {
-    ty_pair_has_smt_equality(bctx, span, ty, ty)
-}
-
 pub(crate) fn ty_pair_has_smt_equality<'tcx>(
     bctx: &BodyCtxt<'tcx>,
     span: Span,
@@ -1674,6 +1666,64 @@ pub(crate) fn ty_pair_has_smt_equality<'tcx>(
             Ok(implements_structural(&bctx, ty2))
         }
         _ => Ok(false),
+    }
+}
+
+/// Does matching a constant or literal pattern of this type agree with the SMT solver's ==?
+/// rustc matches such constants field by field (it requires derived PartialEq), so this
+/// holds unless some leaf is a float or pointer.
+pub(crate) fn ty_has_pattern_smt_equality<'tcx>(
+    bctx: &BodyCtxt<'tcx>,
+    ty: rustc_middle::ty::Ty<'tcx>,
+) -> bool {
+    pattern_smt_equality_rec(bctx, ty, &mut Vec::new())
+}
+
+fn pattern_smt_equality_rec<'tcx>(
+    bctx: &BodyCtxt<'tcx>,
+    ty: rustc_middle::ty::Ty<'tcx>,
+    visiting: &mut Vec<rustc_middle::ty::Ty<'tcx>>,
+) -> bool {
+    use rustc_middle::ty::TyKind;
+    let tcx = bctx.ctxt.tcx;
+    match ty.kind() {
+        TyKind::Bool | TyKind::Char | TyKind::Int(_) | TyKind::Uint(_) | TyKind::Str => true,
+        TyKind::Ref(_, t, _) | TyKind::Array(t, _) | TyKind::Slice(t) => {
+            pattern_smt_equality_rec(bctx, *t, visiting)
+        }
+        TyKind::Tuple(ts) => ts.iter().all(|t| pattern_smt_equality_rec(bctx, t, visiting)),
+        TyKind::Param(_) => implements_structural(bctx, ty),
+        TyKind::Adt(adt_def, args) => {
+            if implements_structural(bctx, ty) || visiting.contains(&ty) {
+                return true;
+            }
+            let Some(structural_peq) = tcx.lang_items().structural_peq_trait() else {
+                return false;
+            };
+            let infcx = tcx.infer_ctxt().build(TypingMode::PostAnalysis);
+            let erased = tcx.erase_and_anonymize_regions(ty);
+            if adt_def.is_union()
+                || erased.has_escaping_bound_vars()
+                || !infcx
+                    .type_implements_trait(
+                        structural_peq,
+                        vec![erased].into_iter(),
+                        tcx.param_env(bctx.fun_id),
+                    )
+                    .must_apply_modulo_regions()
+            {
+                return false;
+            }
+            visiting.push(ty);
+            let typing_env = TypingEnv::post_analysis(tcx, bctx.fun_id);
+            let ok = adt_def.all_fields().all(|f| {
+                let fty = tcx.normalize_erasing_regions(typing_env, f.ty(tcx, args));
+                pattern_smt_equality_rec(bctx, fty, visiting)
+            });
+            visiting.pop();
+            ok
+        }
+        _ => false,
     }
 }
 
