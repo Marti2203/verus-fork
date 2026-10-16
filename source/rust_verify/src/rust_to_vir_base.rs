@@ -1670,7 +1670,8 @@ pub(crate) fn ty_pair_has_smt_equality<'tcx>(
 }
 
 /// Does matching a literal or constant pattern of this type agree with SMT ==?
-/// rustc compares such constants field by field, so yes unless a leaf is a float or pointer.
+/// rustc compares such constants field by field, so yes unless a field is a float, a pointer,
+/// or ghost/tracked.
 pub(crate) fn ty_has_pattern_smt_equality<'tcx>(
     bctx: &BodyCtxt<'tcx>,
     ty: rustc_middle::ty::Ty<'tcx>,
