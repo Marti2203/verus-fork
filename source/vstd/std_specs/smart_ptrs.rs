@@ -87,7 +87,7 @@ pub assume_specification<'a, T: Clone>[ <Arc<[T]> as core::convert::From<&'a [T]
 // `Arc<[T]>` from a `Vec` moves the elements, in order. Stated on the
 // contents (`arc_contents`) because std's impl is allocator-generic and
 // `Arc`'s `View` is for the global allocator only.
-pub assume_specification<T, A: Allocator + Clone>[ <Arc<[T], A> as core::convert::From<alloc::vec::Vec<T, A>>>::from ](
+pub assume_specification<T, A: core::alloc::AllocatorClone>[ <Arc<[T], A> as core::convert::From<alloc::vec::Vec<T, A>>>::from ](
     v: alloc::vec::Vec<T, A>,
 ) -> (r: Arc<[T], A>)
     ensures
@@ -97,8 +97,8 @@ pub assume_specification<T, A: Allocator + Clone>[ <Arc<[T], A> as core::convert
 // Collecting into an `Arc<[T]>` keeps the iterator's items, in order --
 // the twin of `Vec`'s `FromIteratorSpecImpl`.
 impl<T> super::iter::FromIteratorSpecImpl<T> for Arc<[T]> {
-    open spec fn from_iter_ensures(remaining: Seq<T>, s: Self) -> bool {
-        arc_contents(&s)@ == remaining
+    open spec fn from_iter_ensures(remaining: Seq<T>, will_return_none: bool, s: Self) -> bool {
+        will_return_none && arc_contents(&s)@ == remaining
     }
 }
 
@@ -117,7 +117,7 @@ pub assume_specification<T: Clone, A: Allocator + Clone>[ <Box<T, A> as Clone>::
 ;
 
 // Cloning an `Arc` shares the allocation: the clone is the same value.
-pub assume_specification<T: ?Sized, A: Allocator + Clone>[ <Arc<T, A> as Clone>::clone ](
+pub assume_specification<T: ?Sized, A: core::alloc::AllocatorClone>[ <Arc<T, A> as Clone>::clone ](
     a: &Arc<T, A>,
 ) -> (res: Arc<T, A>)
     ensures

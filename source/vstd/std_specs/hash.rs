@@ -1054,8 +1054,8 @@ pub assume_specification<Key>[ HashSet::<Key>::with_capacity ](capacity: usize) 
 // obey the model and a valid hasher the result is exactly the items' set --
 // `insert`'s specification, read item by item.
 impl<T, S> super::iter::FromIteratorSpecImpl<T> for HashSet<T, S> where T: Eq + Hash, S: BuildHasher + Default {
-    open spec fn from_iter_ensures(remaining: Seq<T>, s: Self) -> bool {
-        keys_obey_model::<T>(remaining.to_set()) && builds_valid_hashers::<S>() ==> s@ == remaining.to_set()
+    open spec fn from_iter_ensures(remaining: Seq<T>, will_return_none: bool, s: Self) -> bool {
+        will_return_none && (keys_obey_model::<T>(remaining.to_set()) && builds_valid_hashers::<S>() ==> s@ == remaining.to_set())
     }
 }
 
