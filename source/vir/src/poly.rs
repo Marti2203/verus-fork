@@ -472,7 +472,11 @@ fn visit_exp(ctx: &Ctx, state: &mut State, exp: &Exp) -> Exp {
             &exp.span,
             match state.types.get(x) {
                 Some(typ) => typ,
-                None => panic!("unknown variable: {:?}", x),
+                None => {
+                    // If you encounter this, consider giving the variable a LocalDeclKind
+                    // that is not TempViaAssign.
+                    panic!("variable is unknown or type has not been inferred: {:?}", x)
+                }
             },
             ExpX::Var(x.clone()),
         ),
@@ -650,7 +654,7 @@ fn visit_exp(ctx: &Ctx, state: &mut State, exp: &Exp) -> Exp {
                 | UnaryOpr::AutoLoopEnsures => {
                     mk_exp_typ(&e1.typ, ExpX::UnaryOpr(op.clone(), e1.clone()))
                 }
-                UnaryOpr::ToDyn(_) => {
+                UnaryOpr::ToDyn(..) => {
                     let e1 = coerce_exp_to_poly(ctx, &e1);
                     mk_exp(ExpX::UnaryOpr(op.clone(), e1))
                 }
@@ -1196,6 +1200,7 @@ fn visit_func_check_sst(
             | (LocalDeclKind::Nondeterministic, _, _)
             | (LocalDeclKind::BorrowMut, _, _)
             | (LocalDeclKind::ExecClosureRet, _, _)
+            | (LocalDeclKind::LoopBreakValue, _, _)
             | (LocalDeclKind::Decreases, _, _) => coerce_typ_to_native(ctx, &l.typ),
             (LocalDeclKind::TempViaAssign, _, _) => l.typ.clone(),
         };

@@ -1800,3 +1800,154 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_vir_error_msg(err, "cannot use `verus_builtin::SpecNeg::spec_neg` in executable context")
 }
+
+test_verify_one_file! {
+    #[test] exec_attr_proof_fn_issue3147 verus_code! {
+        #[verifier::exec]
+        proof fn helper()
+            no_unwind
+        {
+        }
+
+        fn main()
+            no_unwind
+        {
+            helper();
+        }
+    } => Err(err) => assert_vir_error_msg(err, "conflicting mode attributes: `exec` and `proof`")
+}
+
+test_verify_one_file! {
+    #[test] exec_attr_private_proof_method_issue3147 verus_code! {
+        trait Get { fn get(&self, x: u64) -> u64; }
+        struct S {}
+
+        impl Get for S {
+            fn get(&self, x: u64) -> u64 { 7 }
+        }
+
+        impl S {
+            #[verifier::exec]
+            proof fn get(&self, x: u64) -> (r: u64)
+                ensures r == x,
+            {
+                x
+            }
+        }
+
+        fn main() {
+            let s = S {};
+            let r = s.get(5);
+            assert(r == 5);
+        }
+    } => Err(err) => assert_vir_error_msg(err, "conflicting mode attributes: `exec` and `proof`")
+}
+
+test_verify_one_file! {
+    #[test] proof_exec_attrs_issue3147 code! {
+        #[verifier::proof]
+        #[verifier::exec]
+        fn f() -> bool { true }
+    } => Err(err) => assert_vir_error_msg(err, "conflicting mode attributes: `proof` and `exec`")
+}
+
+test_verify_one_file! {
+    #[test] exec_attr_checked_spec_fn_issue3147 verus_code! {
+        #[verifier::exec]
+        spec(checked) fn f() -> bool { true }
+    } => Err(err) => assert_vir_error_msg(err, "conflicting mode attributes: `exec` and `spec`")
+}
+
+test_verify_one_file! {
+    #[test] repeated_mode_attrs_issue3147 verus_code! {
+        #[verifier::exec]
+        exec fn e() {}
+
+        #[verifier::proof]
+        proof fn p() {}
+
+        #[verifier::spec]
+        spec(checked) fn s() -> bool { true }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] break_from_proof_block_issue3171 verus_code! {
+        #[verifier::exec_allows_no_decreases_clause]
+        #[allow(unreachable_code)]
+        fn f() {
+            loop {
+                proof {
+                    break;
+                    ()
+                }
+            }
+        }
+    } => Err(err) => assert_vir_error_msg(err, "break/continue is not allowed outside executable context")
+}
+
+test_verify_one_file! {
+    #[test] break_with_value_from_proof_block_issue3171 verus_code! {
+        #[verifier::exec_allows_no_decreases_clause]
+        #[allow(unreachable_code)]
+        fn f() {
+            let x = loop {
+                proof {
+                    break true;
+                    ()
+                }
+            };
+        }
+    } => Err(err) => assert_vir_error_msg(err, "break/continue is not allowed outside executable context")
+}
+
+test_verify_one_file! {
+    #[test] continue_from_proof_block_issue3171 verus_code! {
+        #[verifier::exec_allows_no_decreases_clause]
+        #[allow(unreachable_code)]
+        fn f() {
+            loop {
+                proof {
+                    continue;
+                    ()
+                }
+            }
+        }
+    } => Err(err) => assert_vir_error_msg(err, "break/continue is not allowed outside executable context")
+}
+
+test_verify_one_file! {
+    #[test] break_from_tracked_issue3171 verus_code! {
+        #[verifier::exec_allows_no_decreases_clause]
+        #[allow(unreachable_code)]
+        fn f() {
+            loop {
+                let x = Tracked(break);
+            }
+        }
+    } => Err(err) => assert_vir_error_msg(err, "break/continue is not allowed outside executable context")
+}
+
+test_verify_one_file! {
+    #[test] break_from_ghost_issue3171 verus_code! {
+        #[verifier::exec_allows_no_decreases_clause]
+        #[allow(unreachable_code)]
+        fn f() {
+            loop {
+                let x = Ghost(break);
+            }
+        }
+    } => Err(err) => assert_vir_error_msg(err, "break/continue is not allowed outside executable context")
+}
+
+test_verify_one_file! {
+    #[test] break_from_ghost_local_issue3171 verus_code! {
+        #[verifier::exec_allows_no_decreases_clause]
+        #[allow(unreachable_code)]
+        fn f() {
+            loop {
+                let ghost x = break;
+            }
+        }
+    } => Err(err) => assert_vir_error_msg(err, "break/continue is not allowed outside executable context")
+}

@@ -550,7 +550,7 @@ impl ExpX {
             UnaryOpr(op, exp) => {
                 use crate::ast::UnaryOpr::*;
                 match op {
-                    Box(_) | Unbox(_) | ToDyn(_) => {
+                    Box(_) | Unbox(_) | ToDyn(..) => {
                         return exp.x.to_string_prec(global, precedence);
                     }
                     HasType(t) => {
@@ -1050,6 +1050,7 @@ impl LocalDeclKind {
             | LocalDeclKind::ExecClosureRet
             | LocalDeclKind::Nondeterministic
             | LocalDeclKind::OpenInvariantInnerTemp
+            | LocalDeclKind::LoopBreakValue
             | LocalDeclKind::BorrowMut => false,
         }
     }

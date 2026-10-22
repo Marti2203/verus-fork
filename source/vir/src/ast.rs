@@ -569,8 +569,9 @@ pub enum UnaryOpr {
     /// For primitive types this is trivially true.
     /// For datatypes this is recursive in the natural way.
     HasResolved(Typ),
-    /// Coerce from concrete type to `dyn T`. Typ arg is the Self type
-    ToDyn(Typ),
+    /// Coerce from concrete type to `dyn T`, recording the Self type and the
+    /// trait implementations needed to construct the trait object.
+    ToDyn(Typ, ImplPaths),
     /// Isolation boundary for the loop of the given label, which must be contained
     /// in the boundary.
     LoopIsolationBoundary(Label),
@@ -926,7 +927,7 @@ pub enum PatternX {
     /// Fields can appear **in any order** even for tuple variants.
     Constructor(Dt, Ident, Binders<Pattern>),
     Or(Pattern, Pattern),
-    /// Matches something equal to the value of this expr
+    /// Matches something equal to the value of this expr *using spec equality*
     /// This only supports literals, consts, and pure functions
     /// so we don't need to worry about side-effects, binding order, etc.
     /// See `check_expr_in_pattern` for the exact supported expressions.
@@ -945,6 +946,8 @@ pub enum PatternX {
     /// and ultimately x will have type `&mut T`.
     MutRef(Pattern),
     ImmutRef(Pattern),
+    /// Match against a slice or array
+    Slice(Patterns),
 }
 
 /// Arms of match expressions
@@ -1247,8 +1250,8 @@ pub enum ExprX {
     InvMask(MaskSpec),
     /// Return from function
     Return(Option<Expr>),
-    /// break or continue
-    BreakOrContinue { label: Label, is_break: bool },
+    /// break or continue; only break may carry a loop result
+    BreakOrContinue { label: Label, is_break: bool, value: Option<Expr> },
     /// Enter a Rust ghost block, which will be erased during compilation.
     /// In principle, this is not needed, because we can infer which code to erase using modes.
     /// However, we can't easily communicate the inferred modes back to rustc for erasure
@@ -1716,8 +1719,6 @@ pub struct FunctionX {
     /// For async functions, `inner_ret` has the source-level type and `outer_ret` has
     /// the `impl Future` opaque type. In this case, the two should be named differently.
     pub inner_ret: Param,
-    /// Can the ensures clause reference the 'ret' param (must be true for non-unit types)
-    pub ens_has_return: bool,
     /// Preconditions (requires for proof/exec functions, recommends for spec functions)
     pub require: Exprs,
     /// Postconditions (proof/exec functions only)
@@ -1777,7 +1778,6 @@ pub struct FunctionStubX {
     pub typ_bounds: GenericBounds,
     pub params: Params,
     pub outer_ret: Param,
-    pub ens_has_return: bool,
     pub item_kind: ItemKind,
     pub attrs: FunctionAttrs,
 }

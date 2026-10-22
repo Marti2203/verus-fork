@@ -133,8 +133,6 @@ pub struct Ctx {
     // is overkill, perhaps this should be revisited.
     pub(crate) string_hashes: RefCell<HashMap<BigUint, Arc<String>>>,
     pub(crate) byte_string_hashes: RefCell<HashMap<BigUint, Arc<Vec<u8>>>>,
-    // proof debug purposes
-    pub debug: bool,
     pub arch_word_bits: ArchWordBits,
 }
 
@@ -476,6 +474,13 @@ impl GlobalCtx {
                 t,
             );
         }
+        for a in &krate.assoc_type_impls {
+            crate::recursive_types::add_assoc_type_impl_to_graph(
+                &mut span_infos,
+                &mut func_call_graph,
+                a,
+            );
+        }
 
         // map (method, impl) to impl Fun
         let mut trait_impl_map: HashMap<(Fun, Path), Fun> = HashMap::new();
@@ -805,7 +810,6 @@ impl Ctx {
         used_builtins: crate::prune::UsedBuiltins,
         fndef_types: Vec<Fun>,
         resolved_typs: Vec<crate::resolve_axioms::ResolvableType>,
-        debug: bool,
     ) -> Result<Self, VirErr> {
         let name_ctxt = NameCtxt::new();
         let mut datatype_is_transparent: HashMap<Dt, bool> = HashMap::new();
@@ -881,7 +885,6 @@ impl Ctx {
             global,
             string_hashes,
             byte_string_hashes,
-            debug,
             arch_word_bits: krate.arch.word_bits,
             opaque_type_map,
         })

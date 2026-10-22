@@ -1087,6 +1087,17 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
+    #[test] has_resolved_compute_only_github3164 verus_code! {
+        fn test() {
+            let x = false;
+            assert(has_resolved(x));
+            assert(has_resolved(x) == x) by (compute_only);
+            assert(false);
+        }
+    } => Err(err) => assert_vir_error_msg(err, "assert_by_compute_only failed to simplify down to true")
+}
+
+test_verify_one_file! {
     #[test] seq_new_len_overflow_issue2177 verus_code! {
         use vstd::prelude::*;
         proof fn test() {
@@ -1145,6 +1156,23 @@ test_verify_one_file! {
             assert(h::<u8>(1) == h::<u64>(1)) by (compute_only); // FAILS
         }
     } => Err(err) => assert_vir_error_msg(err, "failed to simplify down to true")
+}
+
+test_verify_one_file! {
+    #[test] float_cast_target_types_differ_github3136 verus_code! {
+        proof fn test(f: f32) {
+            assert((f as u8) as i32 == (f as i8) as i32) by (compute_only); // FAILS
+        }
+    } => Err(err) => assert_vir_error_msg(err, "failed to simplify down to true")
+}
+
+test_verify_one_file! {
+    #[test] float_cast_target_types_match verus_code! {
+        proof fn test(f: f32, x: i32) {
+            assert((f as u8) as i32 == (f as u8) as i32) by (compute_only);
+            assert((x as f32) as i64 == (x as f32) as i64) by (compute_only);
+        }
+    } => Ok(())
 }
 
 test_verify_one_file! {
@@ -1316,6 +1344,94 @@ test_verify_one_file! {
         proof fn test(x: int) {
             assert(g(x + 1) == x + 1);
             assert(f(x)) by (compute);
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] when_not_unfolded_regression_3135 verus_code! {
+        spec fn id(v: int) -> int {
+            v
+        }
+
+        spec fn f(x: int) -> int
+            decreases x,
+            when false
+        {
+            choose|v: int| #[trigger] id(v) == f(0) + 1
+        }
+
+        spec fn g(x: int, b: bool) -> int
+            decreases x,
+            when b && !b
+        {
+            choose|v: int| #[trigger] id(v) == g(0, b) + 1
+        }
+
+        proof fn bad_f()
+            ensures
+                false,
+        {
+            assert(f(0) == (choose|v: int| #[trigger] id(v) == f(0) + 1)) by (compute); // FAILS
+            assert(id(f(0) + 1) == f(0) + 1);
+        }
+
+        proof fn bad_g(b: bool)
+            ensures
+                false,
+        {
+            assert(g(0, b) == (choose|v: int| #[trigger] id(v) == g(0, b) + 1)) by (compute); // FAILS
+            assert(id(g(0, b) + 1) == g(0, b) + 1);
+        }
+    } => Err(err) => assert_fails(err, 2)
+}
+
+test_verify_one_file! {
+    #[test] when_unsatisfied_compute_only_regression_3135 verus_code! {
+        spec fn t(x: int) -> int
+            decreases x,
+            when x >= 0
+        {
+            if x <= 0 { 7 } else { t(x - 1) }
+        }
+
+        // The caller's parameter `x` must not be used to check t's `when` condition
+        spec fn h(x: int) -> int {
+            t(x - 10)
+        }
+
+        proof fn bad() {
+            assert(h(5) == 7) by (compute_only);
+        }
+    } => Err(err) => assert_vir_error_msg(err, "failed to simplify down to true")
+}
+
+test_verify_one_file! {
+    #[test] when_unsatisfied_bit_vector_regression_3135 verus_code! {
+        spec fn t(x: int) -> u8
+            decreases x,
+            when x >= 0
+        {
+            if x <= 0 { 7 } else { t(x - 1) }
+        }
+
+        proof fn bad() {
+            assert(t(-1) == 7) by (bit_vector);
+        }
+    } => Err(err) => assert_vir_error_msg(err, "unsupported for bit-vector")
+}
+
+test_verify_one_file! {
+    #[test] when_satisfied_unfolded verus_code! {
+        spec fn t(x: int) -> int
+            decreases x,
+            when x >= 0
+        {
+            if x <= 0 { 7 } else { t(x - 1) }
+        }
+
+        proof fn good() {
+            assert(t(5) == 7) by (compute_only);
         }
     } => Ok(())
 }

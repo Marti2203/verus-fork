@@ -95,14 +95,15 @@ pub(crate) fn fn_call_to_vir<'tcx>(
             return mk_one_vir_arg(bctx, expr.span, &args);
         }
         Some(RustItem::CloneClone) => {
-            // Special case `clone` for standard Rc and Arc types
-            // (Could also handle it for other types where cloning is the identity
-            // operation in the SMT encoding.)
+            // Special case `clone` for standard Rc and Arc types, shared references, and unit,
+            // where cloning is the identity operation in the SMT encoding.
             let arg_typ = node_substs[0].expect_ty();
 
-            if is_type_std_rc_or_arc_or_ref(bctx.ctxt.tcx, arg_typ) {
+            if is_type_std_rc_or_arc_or_ref(bctx.ctxt.tcx, arg_typ)
+                || matches!(arg_typ.kind(), TyKind::Tuple(ts) if ts.is_empty())
+            {
                 let arg = mk_one_vir_arg(bctx, expr.span, &args)?;
-                record_misc(bctx, expr, MiscCall::SmartPtrClone { is_method });
+                record_misc(bctx, expr, MiscCall::IdentityClone { is_method });
                 return Ok(arg);
             }
         }
@@ -2078,6 +2079,9 @@ fn verus_item_to_vir<'tcx, 'a>(
             use vir::ast::IeeeFloatUnaryOp;
             record_spec_fn(bctx, expr);
             let varg = mk_one_vir_arg(bctx, expr.span, &args)?;
+            if !matches!(fop, IeeeFloatUnaryItem::Cast) {
+                check_ieee_float_operands(expr.span, &[&varg])?;
+            }
             let vop = match fop {
                 IeeeFloatUnaryItem::Cast => UnaryOp::IeeeFloat(IeeeFloatUnaryOp::Cast),
                 IeeeFloatUnaryItem::Neg => UnaryOp::IeeeFloat(IeeeFloatUnaryOp::Neg),
@@ -2105,6 +2109,7 @@ fn verus_item_to_vir<'tcx, 'a>(
             use vir::ast::IeeeFloatBinaryOp;
             record_spec_fn(bctx, expr);
             let (lhs, rhs) = mk_two_vir_args(bctx, expr.span, &args)?;
+            check_ieee_float_operands(expr.span, &[&lhs, &rhs])?;
             let vop = match fop {
                 IeeeFloatBinaryItem::Add => BinaryOp::IeeeFloat(IeeeFloatBinaryOp::Add),
                 IeeeFloatBinaryItem::Sub => BinaryOp::IeeeFloat(IeeeFloatBinaryOp::Sub),
@@ -2764,7 +2769,7 @@ fn extract_choose<'tcx>(
                 let name = pat_to_var(x.pat)?;
                 let vir_expr = bctx.spanned_typed_new(x.span, &typ, ExprX::Var(name.clone()));
                 let mut erasure_info = bctx.ctxt.erasure_info.borrow_mut();
-                erasure_info.hir_vir_ids.push((Some(x.pat.hir_id), vir_expr.span.id));
+                erasure_info.local_hir_vir_ids.push((None, vir_expr.span.id));
                 vars.push(vir_expr);
                 params.push(Arc::new(VarBinderX { name, a: typ }));
             }
@@ -3006,6 +3011,22 @@ fn mk_two_vir_args<'tcx>(
     let e0 = expr_to_vir_consume(bctx, &args[0])?;
     let e1 = expr_to_vir_consume(bctx, &args[1])?;
     Ok((e0, e1))
+}
+
+/// IEEE float operations are encoded per float format, so each operand needs a concrete float type.
+fn check_ieee_float_operands(span: Span, operands: &[&vir::ast::Expr]) -> Result<(), VirErr> {
+    for operand in operands {
+        if !matches!(&*undecorate_typ(&operand.typ), TypX::Float(_)) {
+            return err_span(
+                span,
+                format!(
+                    "IEEE floating point operations require f32 or f64 operands (got `{}`)",
+                    typ_to_diagnostic_str(&operand.typ)
+                ),
+            );
+        }
+    }
+    Ok(())
 }
 
 fn get_string_lit_arg<'tcx>(
