@@ -1261,6 +1261,11 @@ pub assume_specification<Key, S, A: Allocator>[ HashSet::<Key, S, A>::clear ](
         final(m)@ == Set::<Key>::empty(),
 ;
 
+pub assume_specification<Key, S, A: Allocator>[ HashSet::<Key, S, A>::capacity ](
+    m: &HashSet<Key, S, A>,
+) -> (cap: usize)
+;
+
 pub assume_specification<'a, Key, S, A: Allocator>[ HashSet::<Key, S, A>::iter ](
     m: &'a HashSet<Key, S, A>,
 ) -> (hash_keys: hash_set::Iter<'a, Key>)
