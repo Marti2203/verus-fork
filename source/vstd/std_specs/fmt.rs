@@ -223,6 +223,13 @@ def_type_axiom!(&str, axiom_fmt_req_all_str);
 #[cfg(all(feature = "alloc", not(verus_verify_core)))]
 def_type_axiom!(alloc::string::String, axiom_fmt_req_all_string);
 
+// A `Cow<str>` formats as its text, like `str` and `String`: no requirement.
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+pub broadcast axiom fn axiom_fmt_req_all_cow_str<'a>()
+    ensures
+        #[trigger] fmt_req_all::<alloc::borrow::Cow<'a, str>>(),
+;
+
 pub broadcast axiom fn axiom_fmt_req_all_ref<A>()
     requires
         fmt_req_all::<A>(),
@@ -282,6 +289,8 @@ pub broadcast group group_fmt_axioms {
     axiom_fmt_req_all_str,
     #[cfg(all(feature = "alloc", not(verus_verify_core)))]
     axiom_fmt_req_all_string,
+    #[cfg(all(feature = "alloc", not(verus_verify_core)))]
+    axiom_fmt_req_all_cow_str,
     axiom_fmt_req_all_ref,
     // traits
     axiom_fmt_req_all_binary,
