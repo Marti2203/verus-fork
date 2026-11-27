@@ -705,3 +705,20 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_fails(err, 2)
 }
+
+test_verify_one_file_with_options! {
+    #[test] auto_triggers_no_duplicates_issue1907 ["--triggers"] => verus_code! {
+        uninterp spec fn f(x: int, y: int) -> bool;
+        uninterp spec fn g(x: int, y: int) -> bool;
+        uninterp spec fn h(x: int, y: int) -> bool;
+
+        proof fn hi()
+            ensures forall|x: int, y: int, z: int| f(x, y) && g(y, z) && h(x, z)
+        {
+            assume(false);
+        }
+    } => Ok(err) => {
+        let triggers: Vec<_> = err.notes.iter().map(|n| n.message.trim()).filter(|m| m.starts_with("trigger ")).collect();
+        assert_eq!(triggers, vec!["trigger 1 of 3:", "trigger 2 of 3:", "trigger 3 of 3:"]);
+    }
+}

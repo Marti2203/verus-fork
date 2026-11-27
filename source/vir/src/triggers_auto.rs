@@ -705,6 +705,13 @@ fn compute_triggers(
                     return Ok(());
                 }
             }
+            // The search can reach the same set of terms in different orders
+            let new_terms: HashSet<&Term> = trigger.iter().map(|(t, _)| t).collect();
+            if state.chosen_triggers.iter().any(|old| {
+                old.len() == trigger.len() && old.iter().all(|(t, _)| new_terms.contains(t))
+            }) {
+                return Ok(());
+            }
         }
         state.chosen_triggers.push(trigger);
         return Ok(());
